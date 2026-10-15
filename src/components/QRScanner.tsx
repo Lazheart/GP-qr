@@ -546,29 +546,29 @@ export function QRScanner({
             </button>
           </form>
 
-          {/* Quick-test shortcuts with registered attendees */}
-          {currentRegistrations.length > 0 && (
-            <div className="pt-1">
-              <p className="text-[10px] font-mono uppercase text-zinc-500 mb-1.5">
-                Prueba rápida con participantes de este evento:
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {currentRegistrations.slice(0, 4).map((reg) => (
-                  <button
-                    key={reg.id}
-                    type="button"
-                    onClick={() => handleExecuteScan(reg.qr_token)}
-                    className="flex items-center gap-1 rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] font-mono text-zinc-300 hover:bg-white/[0.08] hover:text-white transition-colors"
-                  >
-                    <QrCode className="h-3 w-3 text-zinc-400" />
-                    <span>
-                      {reg.full_name.split(" ")[0]} ({reg.document_number})
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+      {/* Quick-test shortcuts with registered attendees
+      {currentRegistrations.length > 0 && (
+        <div className="pt-1">
+          <p className="text-[10px] font-mono uppercase text-zinc-500 mb-1.5">
+            Prueba rápida con participantes de este evento:
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {currentRegistrations.slice(0, 4).map((reg) => (
+              <button
+                key={reg.id}
+                type="button"
+                onClick={() => handleExecuteScan(reg.qr_token)}
+                className="flex items-center gap-1 rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] font-mono text-zinc-300 hover:bg-white/[0.08] hover:text-white transition-colors"
+              >
+                <QrCode className="h-3 w-3 text-zinc-400" />
+                <span>  
+                  {reg.full_name.split(" ")[0]} ({reg.document_number})
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}*/}
         </div>
 
         {/* Right Column: Result Card + Audit Trail */}
