@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   QrCode,
@@ -18,16 +18,61 @@ import {
   Sparkles,
   Layers,
   ChevronRight,
+  User,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 export default function HomePage() {
   const [activeDemoTab, setActiveDemoTab] = useState<"credencial" | "excel" | "scanner">("credencial");
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    // 1. Cargar inmediatamente desde sessionStorage si ya existe
+    if (typeof window !== "undefined") {
+      const cachedEmail = sessionStorage.getItem("user_email");
+      if (cachedEmail) {
+        setUserEmail(cachedEmail);
+      }
+    }
+
+    // 2. Verificar la sesión en Supabase y sincronizar con sessionStorage
+    try {
+      const supabase = createClient();
+      supabase.auth.getUser().then(({ data }) => {
+        if (data?.user?.email) {
+          setUserEmail(data.user.email);
+          sessionStorage.setItem("user_email", data.user.email);
+        } else {
+          setUserEmail(null);
+          sessionStorage.removeItem("user_email");
+        }
+      }).catch(() => {
+        // En caso de fallo o modo offline, mantener lo que había en sessionStorage
+      });
+
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (session?.user?.email) {
+          setUserEmail(session.user.email);
+          sessionStorage.setItem("user_email", session.user.email);
+        } else if (!session) {
+          setUserEmail(null);
+          sessionStorage.removeItem("user_email");
+        }
+      });
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    } catch {
+      // Supabase no inicializado o error
+    }
+  }, []);
 
   return (
     <div className="min-h-screen bg-black text-[#ededed] font-sans antialiased relative selection:bg-white selection:text-black">
       {/* Vercel subtle grid and gentle spotlight background */}
       <div className="absolute inset-0 vercel-grid pointer-events-none opacity-40" />
-      <div className="absolute top-0 inset-x-0 h-[560px] vercel-spotlight pointer-events-no ne" />
+      <div className="absolute top-0 inset-x-0 h-[560px] vercel-spotlight pointer-events-none" />
 
       {/* Navigation Header */}
       <header className="sticky top-0 z-50 w-full border-b border-white/[0.08] bg-black/80 backdrop-blur-md">
@@ -53,12 +98,25 @@ export default function HomePage() {
 
           {/* Action Buttons */}
           <div className="flex items-center gap-3">
-            <Link
-              href="/auth"
-              className="px-3 py-1.5 rounded-md text-xs font-medium text-zinc-300 hover:text-white hover:bg-white/[0.05] transition-colors"
-            >
-              Iniciar Sesión
-            </Link>
+            {userEmail ? (
+              <Link
+                href="/dashboard"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 bg-white/[0.04] text-xs hover:border-white/20 hover:bg-white/[0.07] transition-all"
+                title={`Sesión activa: ${userEmail}`}
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                <span className="font-mono text-zinc-300 font-medium max-w-[140px] truncate">
+                  {userEmail.split("@")[0]}
+                </span>
+              </Link>
+            ) : (
+              <Link
+                href="/auth"
+                className="px-3 py-1.5 rounded-md text-xs font-medium text-zinc-300 hover:text-white hover:bg-white/[0.05] transition-colors"
+              >
+                Iniciar Sesión
+              </Link>
+            )}
             <Link
               href="/dashboard"
               className="flex items-center gap-1.5 rounded-md bg-white px-3.5 py-1.5 text-xs font-semibold text-black hover:bg-zinc-200 transition-all shadow-sm"
@@ -101,13 +159,23 @@ export default function HomePage() {
             <ArrowRight className="h-4 w-4" />
           </Link>
 
-          <Link
-            href="/auth"
-            className="flex h-12 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/[0.03] px-6 text-sm font-medium text-zinc-200 transition-all hover:bg-white/[0.08] hover:text-white"
-          >
-            <ShieldCheck className="h-4 w-4" />
-            <span>Acceder o Crear Cuenta</span>
-          </Link>
+          {userEmail ? (
+            <Link
+              href="/dashboard"
+              className="flex h-12 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/[0.03] px-6 text-sm font-medium text-zinc-200 transition-all hover:bg-white/[0.08] hover:text-white"
+            >
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Conectado como <strong className="font-mono text-white font-semibold">{userEmail.split("@")[0]}</strong></span>
+            </Link>
+          ) : (
+            <Link
+              href="/auth"
+              className="flex h-12 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/[0.03] px-6 text-sm font-medium text-zinc-200 transition-all hover:bg-white/[0.08] hover:text-white"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              <span>Acceder o Crear Cuenta</span>
+            </Link>
+          )}
         </div>
       </section>
 
@@ -431,9 +499,15 @@ export default function HomePage() {
         <div className="mx-auto max-w-7xl px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
           <span> <a href="https://github.com/lazheart/GP-qr">GPQR</a> • <a href="https://github.com/lazheart">Lazheart</a></span>
           <div className="flex items-center gap-4 text-zinc-400">
-            <Link href="/auth" className="hover:text-white transition-colors">
-              Iniciar Sesión
-            </Link>
+            {userEmail ? (
+              <span className="text-zinc-300 font-mono">
+                @{userEmail.split("@")[0]}
+              </span>
+            ) : (
+              <Link href="/auth" className="hover:text-white transition-colors">
+                Iniciar Sesión
+              </Link>
+            )}
             <span>•</span>
             <Link href="/dashboard" className="hover:text-white transition-colors">
               Dashboard

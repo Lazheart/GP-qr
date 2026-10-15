@@ -68,8 +68,12 @@ function DashboardContent() {
   const searchParams = useSearchParams();
   const queryEventId = searchParams.get("evento");
 
-  // State
-  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      return sessionStorage.getItem("user_email");
+    }
+    return null;
+  });
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [events, setEvents] = useState<EventItem[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(queryEventId);
@@ -141,8 +145,12 @@ function DashboardContent() {
         const supabase = createClient();
         const { data } = await supabase.auth.getUser();
         if (data.user) {
-          setUserEmail(data.user.email || "Usuario Conectado");
+          const email = data.user.email || "Usuario Conectado";
+          setUserEmail(email);
           setCurrentUserId(data.user.id);
+          if (typeof window !== "undefined" && data.user.email) {
+            sessionStorage.setItem("user_email", data.user.email);
+          }
         }
       } catch {
         // Session will be handled by middleware
@@ -378,6 +386,9 @@ function DashboardContent() {
   // Logout
   const handleLogout = async () => {
     try {
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem("user_email");
+      }
       const supabase = createClient();
       await supabase.auth.signOut();
     } catch {

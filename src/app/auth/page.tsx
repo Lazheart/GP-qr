@@ -41,6 +41,9 @@ export default function AuthPage() {
         const supabase = createClient();
         const { data } = await supabase.auth.getUser();
         if (data.user) {
+          if (typeof window !== "undefined" && data.user.email) {
+            sessionStorage.setItem("user_email", data.user.email);
+          }
           setIsRedirecting(true);
           router.replace("/dashboard");
         }
@@ -94,6 +97,9 @@ export default function AuthPage() {
         }
 
         if (data.user) {
+          if (typeof window !== "undefined" && data.user.email) {
+            sessionStorage.setItem("user_email", data.user.email);
+          }
           // Activar inmediatamente la pantalla de carga para transición suave
           setIsRedirecting(true);
           setSuccessMessage("¡Bienvenido! Accediendo a tu panel...");
@@ -119,6 +125,9 @@ export default function AuthPage() {
         }
 
         if (data.user) {
+          if (typeof window !== "undefined" && data.user.email) {
+            sessionStorage.setItem("user_email", data.user.email);
+          }
           if (data.session) {
             setIsRedirecting(true);
             setSuccessMessage("¡Cuenta creada exitosamente! Accediendo...");
