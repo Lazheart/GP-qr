@@ -129,3 +129,16 @@
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+
+@keyframes shimmer-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+.animate-shimmer-slide {
+  animation: shimmer-slide 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}

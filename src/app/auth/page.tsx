@@ -27,17 +27,22 @@ export default function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Check if already authenticated
+  // Check if already authenticated & prefetch dashboard route
   useEffect(() => {
+    // Pre-cargar la ruta del dashboard en segundo plano para que la navegación sea instantánea
+    router.prefetch("/dashboard");
+
     async function checkUser() {
       try {
         const supabase = createClient();
         const { data } = await supabase.auth.getUser();
         if (data.user) {
-          router.push("/dashboard");
+          setIsRedirecting(true);
+          router.replace("/dashboard");
         }
       } catch {
         // Ignore offline check
@@ -89,10 +94,19 @@ export default function AuthPage() {
         }
 
         if (data.user) {
-          setSuccessMessage("¡Bienvenido! Redirigiendo a tu panel de eventos...");
+          // Activar inmediatamente la pantalla de carga para transición suave
+          setIsRedirecting(true);
+          setSuccessMessage("¡Bienvenido! Accediendo a tu panel...");
+          // Redirigir de inmediato al dashboard
+          router.replace("/dashboard");
+
+          // Respaldo de seguridad en caso de que el cliente demore la navegación suave
           setTimeout(() => {
-            router.push("/dashboard");
-          }, 600);
+            if (window.location.pathname !== "/dashboard") {
+              window.location.assign("/dashboard");
+            }
+          }, 1200);
+          return;
         }
       } else {
         const { data, error } = await supabase.auth.signUp({
@@ -105,21 +119,33 @@ export default function AuthPage() {
         }
 
         if (data.user) {
-          setSuccessMessage(
-            data.session
-              ? "¡Cuenta creada exitosamente! Redirigiendo..."
-              : "Revisa tu bandeja de correo para confirmar tu registro, o continúa al panel."
-          );
-          setTimeout(() => {
-            router.push("/dashboard");
-          }, 1200);
+          if (data.session) {
+            setIsRedirecting(true);
+            setSuccessMessage("¡Cuenta creada exitosamente! Accediendo...");
+            router.replace("/dashboard");
+            setTimeout(() => {
+              if (window.location.pathname !== "/dashboard") {
+                window.location.assign("/dashboard");
+              }
+            }, 1200);
+            return;
+          } else {
+            setSuccessMessage(
+              "Revisa tu bandeja de correo para confirmar tu registro, o continúa al panel."
+            );
+            setTimeout(() => {
+              setIsRedirecting(true);
+              router.replace("/dashboard");
+            }, 600);
+            return;
+          }
         }
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Ocurrió un error al procesar la solicitud.";
       setErrorMessage(msg);
-    } finally {
       setIsLoading(false);
+      setIsRedirecting(false);
     }
   };
 
@@ -308,10 +334,10 @@ export default function AuthPage() {
               {/* Action Submit Button */}
               <button
                 type="submit"
-                disabled={isLoading}
+                disabled={isLoading || isRedirecting}
                 className="w-full mt-2 flex h-11 items-center justify-center gap-2 rounded-lg bg-white px-4 text-xs font-semibold text-black transition-all hover:bg-zinc-200 active:scale-[0.99] disabled:opacity-50"
               >
-                {isLoading ? (
+                {isLoading || isRedirecting ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <>
@@ -323,10 +349,55 @@ export default function AuthPage() {
               </button>
             </form>
 
-
           </div>
         </div>
       </main>
+
+      {/* Pantalla de Carga / Cargapantalla de Transición */}
+      {isRedirecting && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90 backdrop-blur-xl animate-in fade-in duration-200 select-none"
+        >
+          {/* Fondo sutil y spotlight */}
+          <div className="absolute inset-0 vercel-grid pointer-events-none opacity-25" />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[420px] h-[420px] bg-white/[0.04] rounded-full blur-3xl pointer-events-none" />
+
+          {/* Tarjeta / Contenedor central */}
+          <div className="relative z-10 flex flex-col items-center text-center px-6 max-w-sm">
+            {/* Icono con aro de luz y pulsación */}
+            <div className="relative mb-5">
+              <div className="absolute -inset-2 rounded-2xl bg-gradient-to-r from-white/20 via-zinc-400/20 to-white/20 blur-md opacity-75 animate-pulse" />
+              <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl border border-white/20 bg-zinc-950 shadow-2xl">
+                <ShieldCheck className="h-8 w-8 text-white animate-pulse" />
+              </div>
+            </div>
+
+            {/* Badge de estado */}
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium mb-3">
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+              <span>Autenticación concedida</span>
+            </div>
+
+            <h2 className="text-xl font-bold tracking-tight text-white mb-1.5">
+              Accediendo a tu Panel
+            </h2>
+            <p className="text-xs text-zinc-400 max-w-[260px] leading-relaxed">
+              Sincronizando tus credenciales y preparando el gestor de eventos...
+            </p>
+
+            {/* Barra de progreso fluida (Indeterminate Shimmer) */}
+            <div className="w-56 h-1.5 bg-zinc-800/80 rounded-full overflow-hidden mt-6 relative border border-white/10">
+              <div className="h-full bg-gradient-to-r from-transparent via-white to-transparent w-2/3 animate-shimmer-slide" />
+            </div>
+
+            <span className="text-[10px] text-zinc-500 font-mono mt-3">
+              GPQR • Conexión Segura
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="relative z-10 border-t border-white/[0.08] py-4 text-center text-xs text-zinc-600 font-mono">
