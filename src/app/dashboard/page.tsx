@@ -29,6 +29,8 @@ import {
   Copy,
   ExternalLink,
   ShieldCheck,
+  Mail,
+  Loader2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -44,6 +46,7 @@ import {
   createEventInSupabase,
   fetchRegistrationsFromSupabase,
   scanEventQRWithSupabase,
+  sendGuestTicketEmailAction,
 } from "@/lib/db";
 import { exportAttendanceToExcel, downloadExcelTemplate } from "@/lib/excel";
 import { generateQRDataURL, downloadDataUrl, generateQRCodesZip } from "@/lib/qr";
@@ -74,6 +77,8 @@ function DashboardContent() {
   const [modalQRDataUrl, setModalQRDataUrl] = useState<string>("");
   const [copiedToken, setCopiedToken] = useState(false);
   const [isDownloadingZip, setIsDownloadingZip] = useState(false);
+  const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
+  const [emailNotification, setEmailNotification] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // New Event Form State
   const [newEventName, setNewEventName] = useState("");
@@ -245,6 +250,38 @@ function DashboardContent() {
       }
     } catch (e) {
       alert("Error al eliminar participante: " + String(e));
+    }
+  };
+
+  // Enviar credencial oficial por correo electrónico mediante Gmail SMTP
+  const handleSendTicketEmail = async (reg: RegistrationItem) => {
+    if (!selectedEventId || !reg.email) return;
+    setSendingEmailId(reg.id);
+    setEmailNotification(null);
+    try {
+      const res = await sendGuestTicketEmailAction({
+        eventId: selectedEventId,
+        registrationId: reg.id,
+      });
+      if (res.success) {
+        setEmailNotification({
+          type: "success",
+          text: `Credencial enviada exitosamente a ${reg.email}`,
+        });
+        setTimeout(() => setEmailNotification(null), 5000);
+      } else {
+        setEmailNotification({
+          type: "error",
+          text: res.error || "No se pudo enviar el correo.",
+        });
+      }
+    } catch (err) {
+      setEmailNotification({
+        type: "error",
+        text: "Error de comunicación con el servidor de correo.",
+      });
+    } finally {
+      setSendingEmailId(null);
     }
   };
 
@@ -720,6 +757,31 @@ function DashboardContent() {
                   </div>
                 </div>
 
+                {emailNotification && (
+                  <div
+                    className={`flex items-center justify-between rounded-lg px-4 py-3 text-xs border ${
+                      emailNotification.type === "success"
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                        : "border-red-500/30 bg-red-500/10 text-red-300"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {emailNotification.type === "success" ? (
+                        <Check className="h-4 w-4 text-emerald-400 shrink-0" />
+                      ) : (
+                        <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
+                      )}
+                      <span>{emailNotification.text}</span>
+                    </div>
+                    <button
+                      onClick={() => setEmailNotification(null)}
+                      className="text-zinc-400 hover:text-white text-xs font-mono"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+
                 {/* Table */}
                 <div className="rounded-xl border border-white/[0.08] bg-zinc-950/60 overflow-hidden">
                   <div className="overflow-x-auto">
@@ -792,6 +854,22 @@ function DashboardContent() {
                                   >
                                     <QrCode className="h-3.5 w-3.5" />
                                   </button>
+
+                                  {/* Send Digital Ticket Email via Gmail SMTP */}
+                                  {reg.email && (
+                                    <button
+                                      onClick={() => handleSendTicketEmail(reg)}
+                                      disabled={sendingEmailId === reg.id}
+                                      className="rounded border border-white/10 bg-white/[0.05] p-1.5 text-zinc-300 hover:text-white hover:bg-white/[0.1] transition-colors disabled:opacity-40"
+                                      title={`Enviar credencial por correo a ${reg.email}`}
+                                    >
+                                      {sendingEmailId === reg.id ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
+                                      ) : (
+                                        <Mail className="h-3.5 w-3.5" />
+                                      )}
+                                    </button>
+                                  )}
 
                                   {/* Toggle Attendance */}
                                   <button

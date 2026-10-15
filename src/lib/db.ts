@@ -393,6 +393,33 @@ export async function revokeInvitationOrValidator(params: {
   }
 }
 
+export async function sendGuestTicketEmailAction(params: {
+  eventId: string;
+  registrationId: string;
+}): Promise<{ success: boolean; message?: string; error?: string; ticket_url?: string }> {
+  try {
+    const res = await fetch("/api/ticket/enviar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event_id: params.eventId,
+        registration_id: params.registrationId,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || "Error al enviar credencial" };
+    }
+    return {
+      success: true,
+      message: data.message,
+      ticket_url: data.ticket_url,
+    };
+  } catch (err) {
+    return { success: false, error: String(err) };
+  }
+}
+
 /**
  * Local Fallback & State Persistence (Guarantees zero-downtime offline testing)
  */

@@ -150,55 +150,70 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Comprobar si ya existe una invitación pendiente para este correo en este evento
-    const { data: existingPending } = await supabase
-      .from("event_member_invitations")
-      .select("id, invitation_token, status, expires_at")
-      .eq("event_id", event_id)
-      .eq("invited_email", cleanEmail)
-      .eq("status", "pending")
-      .gt("expires_at", new Date().toISOString())
-      .maybeSingle();
+    // 1. Intentar registrar u obtener invitación mediante la función RPC atómica
+    let invitationToken: string | undefined;
+    let expiresAt: string | undefined;
 
-    let invitationToken = existingPending?.invitation_token;
-    let expiresAt = existingPending?.expires_at;
+    const { data: rpcData, error: rpcErr } = await supabase.rpc(
+      "create_or_get_validator_invitation",
+      {
+        p_event_id: event_id,
+        p_email: cleanEmail,
+      }
+    );
 
-    if (existingPending && !invitationToken) {
-      // Reparar token faltante si existía sin token
-      invitationToken = crypto.randomUUID();
-      await supabase
+    if (!rpcErr && rpcData && rpcData.length > 0) {
+      invitationToken = rpcData[0].invitation_token;
+      expiresAt = rpcData[0].expires_at;
+    } else {
+      // Fallback si la función RPC aún no está creada en la base de datos
+      const { data: existingPending } = await supabase
         .from("event_member_invitations")
-        .update({ invitation_token: invitationToken })
-        .eq("id", existingPending.id);
-    }
+        .select("id, invitation_token, status, expires_at")
+        .eq("event_id", event_id)
+        .eq("invited_email", cleanEmail)
+        .eq("status", "pending")
+        .gt("expires_at", new Date().toISOString())
+        .maybeSingle();
 
-    if (!existingPending) {
-      // Crear nueva invitación
-      const newToken = crypto.randomUUID();
-      const newExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      invitationToken = existingPending?.invitation_token;
+      expiresAt = existingPending?.expires_at;
 
-      const { data: inserted, error: insertErr } = await supabase
-        .from("event_member_invitations")
-        .insert({
-          event_id,
-          invited_email: cleanEmail,
-          invitation_token: newToken,
-          status: "pending",
-          invited_by: user.id,
-          expires_at: newExpiry,
-        })
-        .select()
-        .single();
-
-      if (insertErr || !inserted) {
-        return NextResponse.json(
-          { error: "No se pudo registrar la invitación: " + (insertErr?.message || "") },
-          { status: 500 }
-        );
+      if (existingPending && !invitationToken) {
+        invitationToken = crypto.randomUUID();
+        await supabase
+          .from("event_member_invitations")
+          .update({ invitation_token: invitationToken })
+          .eq("id", existingPending.id);
       }
 
-      invitationToken = inserted.invitation_token;
-      expiresAt = inserted.expires_at;
+      if (!existingPending) {
+        const newToken = crypto.randomUUID();
+        const newExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+        const { data: inserted, error: insertErr } = await supabase
+          .from("event_member_invitations")
+          .insert({
+            event_id,
+            invited_email: cleanEmail,
+            invitation_token: newToken,
+            status: "pending",
+            invited_by: user.id,
+            expires_at: newExpiry,
+          })
+          .select()
+          .single();
+
+        if (insertErr || !inserted) {
+          return NextResponse.json(
+            { error: "No se pudo registrar la invitación: " + (insertErr?.message || "") },
+            { status: 500 }
+          );
+        }
+
+        invitationToken = inserted.invitation_token;
+        expiresAt = inserted.expires_at;
+      }
     }
 
     // Construir URL pública HTTPS para aceptar
@@ -207,7 +222,7 @@ export async function POST(req: NextRequest) {
     const origin = host ? `${proto}://${host}` : req.nextUrl.origin;
     const acceptUrl = `${origin}/invitaciones/${invitationToken}`;
 
-    // Enviar correo electrónico
+    // Enviar correo electrónico mediante Gmail SMTP (o simulador fallback)
     const emailResult = await sendValidatorInvitationEmail({
       toEmail: cleanEmail,
       eventName: event.name,
@@ -218,10 +233,13 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Invitación enviada a ${cleanEmail}.`,
+      message: emailResult.success
+        ? `Invitación enviada exitosamente a ${cleanEmail}.`
+        : `Invitación registrada, pero el correo no pudo enviarse: ${emailResult.error || "Revisa la configuración SMTP."}`,
       invitation_token: invitationToken,
       invitation_url: acceptUrl,
       email_sent: emailResult.success,
+      email_error: emailResult.error,
     });
   } catch (err) {
     return NextResponse.json(

@@ -1,13 +1,15 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Download, Copy, Check, UserPlus, Sparkles, RefreshCw } from "lucide-react";
+import { Download, Copy, Check, UserPlus, Sparkles, RefreshCw, Mail, Loader2 } from "lucide-react";
 import { generateQRDataURL, generateQRSvg, downloadDataUrl } from "@/lib/qr";
 import {
   EventItem,
   RegistrationItem,
   getStoredRegistrations,
   saveRegistrations,
+  createRegistrationInSupabase,
+  sendGuestTicketEmailAction,
 } from "@/lib/db";
 
 interface QRGeneratorProps {
@@ -25,6 +27,8 @@ export function QRGenerator({
   const [documentNumber, setDocumentNumber] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [sendEmailImmediately, setSendEmailImmediately] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string>("");
   const [copied, setCopied] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -118,22 +122,40 @@ export function QRGenerator({
       created_at: new Date().toISOString(),
     };
 
+    setIsSubmitting(true);
+    let supabaseRegId: string | null = null;
+
     // Try Supabase insert
     try {
-      const { createRegistrationInSupabase } = await import("@/lib/db");
-      await createRegistrationInSupabase(selectedEvent.id, {
+      const created = await createRegistrationInSupabase(selectedEvent.id, {
         document_number: documentNumber.trim(),
         full_name: fullName.trim(),
         email: email.trim() || undefined,
         phone: phone.trim() || undefined,
         qr_token: qrTok,
       });
+      if (created?.data?.id) {
+        supabaseRegId = created.data.id;
+      }
     } catch (sbErr) {
       console.warn("Supabase insert registration warning:", sbErr);
     }
 
+    // Enviar credencial por correo si está habilitado y tiene correo
+    if (sendEmailImmediately && email.trim() && supabaseRegId) {
+      try {
+        await sendGuestTicketEmailAction({
+          eventId: selectedEvent.id,
+          registrationId: supabaseRegId,
+        });
+      } catch (mailErr) {
+        console.warn("Envío de credencial por correo omitido o fallido:", mailErr);
+      }
+    }
+
     saveRegistrations([newReg, ...allRegs]);
     setSavedSuccess(true);
+    setIsSubmitting(false);
     setTimeout(() => setSavedSuccess(false), 3000);
 
     // Reset next token
@@ -248,6 +270,21 @@ export function QRGenerator({
               {currentToken}
             </p>
           </div>
+
+          {email.trim().length > 0 && (
+            <label className="flex items-center gap-2.5 cursor-pointer select-none text-xs text-zinc-300 bg-white/[0.02] border border-white/[0.08] p-3 rounded-lg hover:border-white/20 transition-colors">
+              <input
+                type="checkbox"
+                checked={sendEmailImmediately}
+                onChange={(e) => setSendEmailImmediately(e.target.checked)}
+                className="h-4 w-4 rounded border-white/20 bg-black/80 text-white focus:ring-0 focus:ring-offset-0 cursor-pointer"
+              />
+              <span className="flex items-center gap-1.5 text-zinc-300 font-medium">
+                <Mail className="h-3.5 w-3.5 text-emerald-400" />
+                Enviar credencial oficial y código QR a este correo al guardar
+              </span>
+            </label>
+          )}
 
           <div className="flex flex-wrap items-center gap-3 pt-2">
             <button

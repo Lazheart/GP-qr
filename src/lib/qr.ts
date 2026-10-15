@@ -30,6 +30,24 @@ export async function generateQRDataURL(
 }
 
 /**
+ * Genera un Buffer en formato PNG para un código QR (para correos y adjuntos en Node.js)
+ */
+export async function generateQRBuffer(
+  text: string,
+  options?: QRCodeOptions
+): Promise<Buffer> {
+  return QRCode.toBuffer(text, {
+    width: options?.width ?? 400,
+    margin: options?.margin ?? 2,
+    color: {
+      dark: options?.color?.dark ?? "#000000",
+      light: options?.color?.light ?? "#ffffff",
+    },
+    errorCorrectionLevel: "H",
+  });
+}
+
+/**
  * Genera un SVG string para un código QR
  */
 export async function generateQRSvg(
