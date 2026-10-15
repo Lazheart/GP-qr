@@ -34,15 +34,9 @@ export default function HomePage() {
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2.5 group">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-black font-bold text-sm tracking-tighter transition-transform group-hover:scale-105">
-              ▲
-            </div>
             <div className="flex flex-col">
               <span className="text-base font-bold tracking-tight text-white flex items-center gap-2">
                 GPQR
-                <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-mono text-zinc-300">
-                  Supabase Edition
-                </span>
               </span>
             </div>
           </Link>
@@ -54,12 +48,6 @@ export default function HomePage() {
             </a>
             <a href="#como-funciona" className="hover:text-white transition-colors">
               Cómo Funciona
-            </a>
-            <a href="#caracteristicas" className="hover:text-white transition-colors">
-              Características
-            </a>
-            <a href="#arquitectura" className="hover:text-white transition-colors">
-              Seguridad & RLS
             </a>
           </nav>
 
@@ -90,21 +78,16 @@ export default function HomePage() {
           <span className="font-mono text-xs text-zinc-300">
             Protocolo de Acreditación y Validación de Asistencia
           </span>
-          <span className="text-zinc-600">•</span>
-          <span className="font-mono text-[11px] text-zinc-400">PostgreSQL + Supabase</span>
         </div>
 
         {/* Heading */}
         <h1 className="mx-auto max-w-4xl text-4xl font-extrabold tracking-tight text-white sm:text-6xl lg:text-7xl">
-          Control de Asistencia y Códigos QR{" "}
-          <span className="bg-gradient-to-b from-white via-zinc-200 to-zinc-500 bg-clip-text text-transparent block mt-2">
-            de Alta Confiabilidad.
-          </span>
+          Control de Asistencia con Códigos QR{" "}
         </h1>
 
         {/* Subtitle */}
         <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-zinc-400 sm:text-lg">
-          GPQR transforma la logística de tus eventos: genera credenciales digitales instantáneas con tokens UUID criptográficos, procesa listas masivas de Excel y audita el ingreso en tiempo real sin riesgo de duplicados.
+          GPQR transforma la logística de tus eventos: genera credenciales digitales instantáneas, procesa listas masivas de Excel y audita el ingreso en tiempo real.
         </p>
 
         {/* CTA Buttons */}
@@ -126,24 +109,51 @@ export default function HomePage() {
             <span>Acceder o Crear Cuenta</span>
           </Link>
         </div>
+      </section>
 
-        {/* Value Metrics Bar */}
-        <div className="mx-auto mt-16 max-w-4xl grid grid-cols-2 sm:grid-cols-4 gap-4 border-y border-white/[0.08] py-6 text-left">
-          <div className="px-3">
-            <p className="text-2xl font-bold text-white font-mono">100%</p>
-            <p className="text-xs text-zinc-500 mt-0.5">Aislamiento por Organizador (RLS)</p>
+            {/* Section: ¿Qué hace el proyecto? */}
+      <section id="que-hace" className="relative mx-auto max-w-7xl px-4 py-16 sm:px-6">
+        <div className="text-center max-w-3xl mx-auto mb-16">
+          <span className="text-xs font-mono uppercase tracking-wider text-zinc-400">
+            Visión General
+          </span>
+          <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl mt-2">
+            ¿Qué problema resuelve GPQR?
+          </h2>
+          <p className="mt-4 text-sm text-zinc-400 leading-relaxed">
+            Las acreditaciones en papel y las listas manuales causan filas interminables, errores humanos y fraudes de acceso. GPQR ofrece un flujo integral, desde la creación del evento hasta la auditoría post-evento.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="rounded-xl border border-white/[0.08] bg-zinc-950/60 p-6 backdrop-blur-sm transition-all hover:border-white/20">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/10 text-white mb-4">
+              <Zap className="h-5 w-5" />
+            </div>
+            <h3 className="text-base font-semibold text-white">Cero Cuellos de Botella</h3>
+            <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
+              Escanea y valida credenciales en menos de medio segundo por persona. Procesa cientos de asistentes en minutos durante las horas pico de tu congreso o conferencia.
+            </p>
           </div>
-          <div className="px-3">
-            <p className="text-2xl font-bold text-white font-mono">&lt; 50ms</p>
-            <p className="text-xs text-zinc-500 mt-0.5">Validación Atómica de QR en Base de Datos</p>
+
+          <div className="rounded-xl border border-white/[0.08] bg-zinc-950/60 p-6 backdrop-blur-sm transition-all hover:border-white/20">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/10 text-white mb-4">
+              <FileSpreadsheet className="h-5 w-5" />
+            </div>
+            <h3 className="text-base font-semibold text-white">Integración Nativa con Excel</h3>
+            <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
+              No tienes que reescribir tus listas. Sube el archivo Excel exportado de formularios de registro y descarga reportes con el estado y hora exacta de asistencia.
+            </p>
           </div>
-          <div className="px-3">
-            <p className="text-2xl font-bold text-white font-mono">Excel</p>
-            <p className="text-xs text-zinc-500 mt-0.5">Importación y Exportación Automática</p>
-          </div>
-          <div className="px-3">
-            <p className="text-2xl font-bold text-white font-mono">ZIP</p>
-            <p className="text-xs text-zinc-500 mt-0.5">Descarga Masiva de Credenciales PNG</p>
+
+          <div className="rounded-xl border border-white/[0.08] bg-zinc-950/60 p-6 backdrop-blur-sm transition-all hover:border-white/20">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/10 text-white mb-4">
+              <Lock className="h-5 w-5" />
+            </div>
+            <h3 className="text-base font-semibold text-white">Prevención de Suplantación</h3>
+            <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
+              Cada código QR es único e intransferible. Una vez registrado el ingreso, cualquier intento posterior de escanear el mismo código es alertado como duplicado.
+            </p>
           </div>
         </div>
       </section>
@@ -201,13 +211,13 @@ export default function HomePage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
               <div>
                 <span className="inline-flex items-center gap-1.5 rounded bg-emerald-500/10 px-2 py-0.5 text-xs font-mono text-emerald-400 border border-emerald-500/20 mb-3">
-                  UUID V4 Criptográfico
+                  QR Unico
                 </span>
                 <h3 className="text-lg font-semibold text-white">
-                  Credencial Individual de Alta Fidelidad
+                  Credencial Unica de Un Solo Uso
                 </h3>
                 <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
-                  Cada participante recibe un código QR asociado a un token UUID generado aleatoriamente. El token no expone datos sensibles ni es predecible, impidiendo la falsificación o duplicación de accesos.
+                  Cada participante recibe un código QR asociado a un registro unico.
                 </p>
                 <ul className="mt-4 space-y-2 text-xs text-zinc-300">
                   <li className="flex items-center gap-2">
@@ -256,7 +266,7 @@ export default function HomePage() {
                   Carga Masiva desde Hojas de Cálculo
                 </h3>
                 <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
-                  ¿Tienes cientos o miles de inscritos en un archivo Excel? Sube tu archivo .xlsx o .csv: el algoritmo inteligente reconoce los encabezados (DNI, Nombre, Email, Teléfono) y valida duplicados antes de insertar en Supabase.
+                  ¿Tienes cientos o miles de inscritos en un archivo Excel? Sube tu archivo .xlsx o .csv: el algoritmo inteligente reconoce los encabezados (DNI, Nombre, Email, Teléfono) y valida duplicados antes de insertarlos.
                 </p>
                 <div className="mt-6 flex gap-3">
                   <Link
@@ -348,54 +358,6 @@ export default function HomePage() {
           )}
         </div>
       </section>
-
-      {/* Section: ¿Qué hace el proyecto? */}
-      <section id="que-hace" className="relative mx-auto max-w-7xl px-4 py-16 sm:px-6">
-        <div className="text-center max-w-3xl mx-auto mb-16">
-          <span className="text-xs font-mono uppercase tracking-wider text-zinc-400">
-            Visión General
-          </span>
-          <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl mt-2">
-            ¿Qué problema resuelve GPQR?
-          </h2>
-          <p className="mt-4 text-sm text-zinc-400 leading-relaxed">
-            Las acreditaciones en papel y las listas manuales causan filas interminables, errores humanos y fraudes de acceso. GPQR ofrece un flujo integral, desde la creación del evento hasta la auditoría post-evento.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="rounded-xl border border-white/[0.08] bg-zinc-950/60 p-6 backdrop-blur-sm transition-all hover:border-white/20">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/10 text-white mb-4">
-              <Zap className="h-5 w-5" />
-            </div>
-            <h3 className="text-base font-semibold text-white">Cero Cuellos de Botella</h3>
-            <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
-              Escanea y valida credenciales en menos de medio segundo por persona. Procesa cientos de asistentes en minutos durante las horas pico de tu congreso o conferencia.
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-white/[0.08] bg-zinc-950/60 p-6 backdrop-blur-sm transition-all hover:border-white/20">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/10 text-white mb-4">
-              <FileSpreadsheet className="h-5 w-5" />
-            </div>
-            <h3 className="text-base font-semibold text-white">Integración Nativa con Excel</h3>
-            <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
-              No tienes que reescribir tus listas. Sube el archivo Excel exportado de formularios de registro y descarga reportes con el estado y hora exacta de asistencia.
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-white/[0.08] bg-zinc-950/60 p-6 backdrop-blur-sm transition-all hover:border-white/20">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/10 text-white mb-4">
-              <Lock className="h-5 w-5" />
-            </div>
-            <h3 className="text-base font-semibold text-white">Prevención de Suplantación</h3>
-            <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
-              Cada código QR es único e intransferible. Una vez registrado el ingreso, cualquier intento posterior de escanear el mismo código es alertado como duplicado.
-            </p>
-          </div>
-        </div>
-      </section>
-
       {/* Section: Cómo Funciona en 4 Pasos */}
       <section id="como-funciona" className="relative mx-auto max-w-7xl px-4 py-16 sm:px-6 border-t border-white/[0.08]">
         <div className="text-center max-w-3xl mx-auto mb-16">
@@ -445,44 +407,6 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Section: Arquitectura y Base de Datos */}
-      <section id="arquitectura" className="relative mx-auto max-w-7xl px-4 py-16 sm:px-6 border-t border-white/[0.08]">
-        <div className="rounded-2xl border border-white/10 bg-zinc-950 p-8 sm:p-12">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded bg-white/10 px-2.5 py-1 text-xs font-mono text-zinc-300 mb-4">
-                <Database className="h-3.5 w-3.5" />
-                <span>supabase/creacion.sql</span>
-              </div>
-              <h2 className="text-2xl sm:text-3xl font-bold text-white">
-                Construido sobre una Arquitectura Relacional Sólida
-              </h2>
-              <p className="mt-3 text-xs sm:text-sm text-zinc-400 leading-relaxed">
-                A diferencia de aplicaciones que almacenan datos volátiles en el navegador, GPQR está diseñado para conectarse directamente con tu proyecto de Supabase. El esquema incluye tablas normalizadas, políticas RLS para garantizar que nadie acceda a eventos ajenos, e índices optimizados para escaneo de alto tráfico.
-              </p>
-              <div className="mt-6 flex flex-wrap gap-2 text-xs font-mono text-zinc-400">
-                <span className="rounded bg-white/5 px-2.5 py-1 border border-white/10">public.events</span>
-                <span className="rounded bg-white/5 px-2.5 py-1 border border-white/10">public.event_registrations</span>
-                <span className="rounded bg-white/5 px-2.5 py-1 border border-white/10">public.attendance_logs</span>
-                <span className="rounded bg-white/5 px-2.5 py-1 border border-white/10">scan_event_qr()</span>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-white/10 bg-black/80 p-5 font-mono text-[11px] text-zinc-300 overflow-x-auto leading-relaxed">
-              <p className="text-zinc-500">-- Procedimiento atómico de validación</p>
-              <p className="text-emerald-400">create or replace function public.scan_event_qr(</p>
-              <p className="pl-4">p_event_id uuid,</p>
-              <p className="pl-4">p_qr_token uuid</p>
-              <p className="text-emerald-400">) returns table (...)</p>
-              <p className="text-zinc-500 mt-2">-- Actualización condicional atómica</p>
-              <p className="text-blue-300">update public.event_registrations</p>
-              <p className="text-blue-300">set checked_in_at = now()</p>
-              <p className="text-blue-300">where qr_token = p_qr_token and checked_in_at is null;</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* CTA Bottom Banner */}
       <section className="relative mx-auto max-w-7xl px-4 py-16 sm:px-6 text-center">
         <h2 className="text-3xl font-bold text-white sm:text-4xl">
@@ -505,7 +429,7 @@ export default function HomePage() {
       {/* Footer */}
       <footer className="border-t border-white/[0.08] bg-black py-8 text-center text-xs text-zinc-500 font-mono">
         <div className="mx-auto max-w-7xl px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <span>GPQR • Protocolo de Asistencia y Acreditación Criptográfica</span>
+          <span> <a href="https://github.com/lazheart/GP-qr">GPQR</a> • <a href="https://github.com/lazheart">Lazheart</a></span>
           <div className="flex items-center gap-4 text-zinc-400">
             <Link href="/auth" className="hover:text-white transition-colors">
               Iniciar Sesión

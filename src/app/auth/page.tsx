@@ -233,9 +233,6 @@ export default function AuthPage() {
                   Registrarse
                 </button>
               </div>
-              <p className="text-[11px] text-zinc-500 text-center mt-2 font-mono">
-                Presiona el botón para alternar entre Iniciar Sesión y Registro
-              </p>
             </div>
 
             {/* Error Message */}
