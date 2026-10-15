@@ -523,27 +523,6 @@ export function QRScanner({
             }}
             className="flex gap-2"
           >
-            <div className="relative flex-1">
-              <input
-                type="text"
-                value={manualToken}
-                onChange={(e) => setManualToken(e.target.value)}
-                placeholder="Ingresar DNI o Token QR manual (Ej: 72938401)..."
-                className="w-full rounded-md border border-white/10 bg-black/60 px-3 py-2 text-xs text-white placeholder-zinc-600 focus:border-white/30 focus:outline-none focus:ring-1 focus:ring-white/20 font-mono"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={!manualToken.trim() || processingManual}
-              className="flex items-center gap-1.5 rounded-md bg-white px-4 py-2 text-xs font-medium text-black hover:bg-zinc-200 disabled:opacity-40 transition-colors"
-            >
-              {processingManual ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Search className="h-3.5 w-3.5" />
-              )}
-              <span>Validar</span>
-            </button>
           </form>
 
       {/* Quick-test shortcuts with registered attendees
