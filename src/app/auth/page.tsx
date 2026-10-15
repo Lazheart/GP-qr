@@ -31,27 +31,36 @@ export default function AuthPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Check if already authenticated & prefetch dashboard route
+  // Check if already authenticated
   useEffect(() => {
-    // Pre-cargar la ruta del dashboard en segundo plano para que la navegación sea instantánea
-    router.prefetch("/dashboard");
+    let isMounted = true;
 
     async function checkUser() {
       try {
         const supabase = createClient();
         const { data } = await supabase.auth.getUser();
-        if (data.user) {
+        if (!isMounted) return;
+
+        if (data?.user) {
           if (typeof window !== "undefined" && data.user.email) {
             sessionStorage.setItem("user_email", data.user.email);
           }
           setIsRedirecting(true);
-          router.replace("/dashboard");
+          // Usar window.location.replace para evitar conflictos con React 19 use() y el router de Next.js
+          window.location.replace("/dashboard");
+        } else {
+          // Solo pre-cargar el dashboard si no hay usuario autenticado activo (para el formulario de login posterior)
+          router.prefetch("/dashboard");
         }
       } catch {
         // Ignore offline check
       }
     }
     checkUser();
+
+    return () => {
+      isMounted = false;
+    };
   }, [router]);
 
   // Primary toggle function to swipe/switch between login and register
