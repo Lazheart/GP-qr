@@ -47,8 +47,19 @@ export interface EmailSendResult {
  * Obtiene la configuración de transporte SMTP
  */
 function getSmtpTransporter() {
-  const user = process.env.GMAIL_USER || process.env.SMTP_USER;
-  const pass = process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASS;
+  const user = (
+    process.env.SMTP_USER ||
+    process.env.GMAIL_USER ||
+    process.env.EMAIL_USER
+  )?.trim();
+
+  const pass = (
+    process.env.SMTP_PASSWORD ||
+    process.env.SMTP_PASS ||
+    process.env.GMAIL_APP_PASSWORD ||
+    process.env.GMAIL_PASSWORD ||
+    process.env.EMAIL_PASSWORD
+  )?.trim().replace(/\s+/g, "");
 
   if (!user || !pass) {
     return null;
@@ -65,9 +76,8 @@ function getSmtpTransporter() {
     port,
     secure,
     auth: {
-      user: user.trim(),
-      // Eliminar espacios accidentales de las contraseñas de aplicación de Google
-      pass: pass.replace(/\s+/g, ""),
+      user,
+      pass,
     },
   });
 }
@@ -80,9 +90,13 @@ function getSenderAddress(): string {
   if (configuredFrom && configuredFrom.trim().length > 0) {
     return configuredFrom.trim();
   }
-  const user = process.env.GMAIL_USER || process.env.SMTP_USER;
+  const user = (
+    process.env.SMTP_USER ||
+    process.env.GMAIL_USER ||
+    process.env.EMAIL_USER
+  )?.trim();
   if (user) {
-    return `GPQR • Asistencia <${user.trim()}>`;
+    return `GPQR Asistencia <${user}>`;
   }
   return "GPQR <no-reply@gpqr.local>";
 }
@@ -172,18 +186,11 @@ export async function sendValidatorInvitationEmail({
     }
   }
 
-  // 2. Fallback de desarrollo si no hay variables SMTP configuradas
-  console.info("=================================================");
-  console.info("✉️ [GPQR EMAIL SIMULATOR] Invitación a Validador");
-  console.info(`Destinatario: ${toEmail}`);
-  console.info(`Evento: ${eventName}`);
-  console.info(`Enlace para aceptar: ${invitationUrl}`);
-  console.info(`Expira: ${formattedExpiry}`);
-  console.info("(Configura GMAIL_USER y GMAIL_APP_PASSWORD para envíos reales)");
-  console.info("=================================================");
-
+  // 2. Fallback si no hay variables SMTP configuradas
+  console.warn("⚠️ [GPQR EMAIL] No hay credenciales SMTP configuradas (SMTP_USER y SMTP_PASSWORD)");
   return {
-    success: true,
+    success: false,
+    error: "Servidor de correo no configurado (faltan variables SMTP_USER y SMTP_PASSWORD en el servidor).",
     previewUrl: invitationUrl,
   };
 }
@@ -327,19 +334,11 @@ export async function sendGuestTicketEmail({
     }
   }
 
-  // 2. Fallback de desarrollo si no hay variables SMTP configuradas
-  console.info("=================================================");
-  console.info("✉️ [GPQR EMAIL SIMULATOR] Pase Digital para Invitado");
-  console.info(`Destinatario: ${toEmail}`);
-  console.info(`Participante: ${participantName} (${documentNumber})`);
-  console.info(`Evento: ${eventName}`);
-  console.info(`Enlace del Pase: ${ticketUrl}`);
-  console.info(`Token QR: ${qrToken}`);
-  console.info("(Configura GMAIL_USER y GMAIL_APP_PASSWORD para envíos reales)");
-  console.info("=================================================");
-
+  // 2. Fallback si no hay variables SMTP configuradas
+  console.warn("⚠️ [GPQR EMAIL] No hay credenciales SMTP configuradas (SMTP_USER y SMTP_PASSWORD)");
   return {
-    success: true,
+    success: false,
+    error: "Servidor de correo no configurado (faltan variables SMTP_USER y SMTP_PASSWORD en el servidor).",
     previewUrl: ticketUrl,
   };
 }
