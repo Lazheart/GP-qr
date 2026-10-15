@@ -132,7 +132,21 @@ export async function parseExcelOrCsvFile(file: File): Promise<ParseExcelResult>
 }
 
 /**
+ * Neutraliza fórmulas maliciosas en celdas de usuario (CSV/Excel Formula Injection).
+ * Valores que inician con '=', '+', '-', '@', tabulaciones o retornos de carro se prefijan con apóstrofe.
+ */
+export function defangFormula(value: string | null | undefined): string {
+  if (!value) return "";
+  const str = String(value).trim();
+  if (/^[=+\-@\t\r]/.test(str)) {
+    return `'${str}`;
+  }
+  return str;
+}
+
+/**
  * Exporta la lista de participantes y estados de asistencia a Excel (.xlsx)
+ * Garantiza que NO se expongan tokens QR ni secretos, y sanitiza fórmulas.
  */
 export function exportAttendanceToExcel(
   registrations: RegistrationItem[],
@@ -140,11 +154,10 @@ export function exportAttendanceToExcel(
 ) {
   const exportData = registrations.map((r, index) => ({
     N: index + 1,
-    Documento: r.document_number,
-    "Nombre y Apellidos": r.full_name,
-    "Correo Electrónico": r.email || "-",
-    Teléfono: r.phone || "-",
-    "Token QR": r.qr_token,
+    Documento: defangFormula(r.document_number),
+    "Nombre y Apellidos": defangFormula(r.full_name),
+    "Correo Electrónico": defangFormula(r.email) || "-",
+    Teléfono: defangFormula(r.phone) || "-",
     Estado: r.status === "registered" ? "Inscrito" : "Cancelado",
     "Asistencia Registrada": r.checked_in_at
       ? new Date(r.checked_in_at).toLocaleString()

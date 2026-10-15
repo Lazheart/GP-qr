@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import {
+  fetchEventsFromSupabase,
+  fetchRegistrationsFromSupabase,
   getStoredEvents,
   getStoredRegistrations,
   saveRegistrations,
@@ -31,28 +33,32 @@ export default function UsuariosPage() {
   const [registrations, setRegistrations] = useState<RegistrationItem[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "checked_in" | "pending">("all");
+  const [loading, setLoading] = useState(true);
 
-  const loadData = useCallback(() => {
-    const loadedEvents = getStoredEvents();
-    setEvents(loadedEvents);
-    const initialId = selectedEventId || (loadedEvents[0]?.id ?? "");
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    const { data: loadedEvents } = await fetchEventsFromSupabase();
+    const eventList = loadedEvents && loadedEvents.length > 0 ? loadedEvents : getStoredEvents();
+    setEvents(eventList);
+    const initialId = selectedEventId || (eventList[0]?.id ?? "");
     if (!selectedEventId && initialId) {
       setSelectedEventId(initialId);
     }
     if (initialId) {
-      const list = getStoredRegistrations(initialId);
-      setRegistrations(list);
+      const { data: regs } = await fetchRegistrationsFromSupabase(initialId);
+      setRegistrations(regs || getStoredRegistrations(initialId));
     }
+    setLoading(false);
   }, [selectedEventId]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  const handleSelectEvent = (id: string) => {
+  const handleSelectEvent = async (id: string) => {
     setSelectedEventId(id);
-    const list = getStoredRegistrations(id);
-    setRegistrations(list);
+    const { data: regs } = await fetchRegistrationsFromSupabase(id);
+    setRegistrations(regs || getStoredRegistrations(id));
   };
 
   const currentEvent = events.find((e) => e.id === selectedEventId) || events[0];
@@ -121,7 +127,11 @@ export default function UsuariosPage() {
 
           <button
             type="button"
-            onClick={() => exportAttendanceToExcel(registrations, currentEvent?.name)}
+            onClick={() => {
+              if (selectedEventId) {
+                window.open(`/api/eventos/${selectedEventId}/export`, "_blank");
+              }
+            }}
             className="flex items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-zinc-300 hover:bg-white/[0.08] hover:text-white transition-colors"
           >
             <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-400" />

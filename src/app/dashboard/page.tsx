@@ -28,6 +28,7 @@ import {
   AlertCircle,
   Copy,
   ExternalLink,
+  ShieldCheck,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -42,12 +43,14 @@ import {
   fetchEventsFromSupabase,
   createEventInSupabase,
   fetchRegistrationsFromSupabase,
+  scanEventQRWithSupabase,
 } from "@/lib/db";
 import { exportAttendanceToExcel, downloadExcelTemplate } from "@/lib/excel";
 import { generateQRDataURL, downloadDataUrl, generateQRCodesZip } from "@/lib/qr";
 import { ExcelUploader } from "@/components/ExcelUploader";
 import { QRGenerator } from "@/components/QRGenerator";
 import { QRScanner } from "@/components/QRScanner";
+import { EventTeamManager } from "@/components/EventTeamManager";
 
 function DashboardContent() {
   const router = useRouter();
@@ -56,6 +59,7 @@ function DashboardContent() {
 
   // State
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [events, setEvents] = useState<EventItem[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(queryEventId);
   const [registrations, setRegistrations] = useState<RegistrationItem[]>([]);
@@ -63,7 +67,7 @@ function DashboardContent() {
 
   // UI state
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
-  const [detailTab, setDetailTab] = useState<"asistentes" | "cargar_excel" | "registrar_manual" | "escanear">("asistentes");
+  const [detailTab, setDetailTab] = useState<"asistentes" | "cargar_excel" | "registrar_manual" | "validadores" | "escanear">("asistentes");
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "checked_in" | "pending">("all");
   const [activeQRModal, setActiveQRModal] = useState<RegistrationItem | null>(null);
@@ -92,6 +96,7 @@ function DashboardContent() {
         const { data } = await supabase.auth.getUser();
         if (data.user) {
           setUserEmail(data.user.email || "Usuario Conectado");
+          setCurrentUserId(data.user.id);
         }
       } catch {
         // Session will be handled by middleware
@@ -202,38 +207,51 @@ function DashboardContent() {
   };
 
   const selectedEvent = events.find((e) => e.id === selectedEventId) || null;
+  const isOwner = Boolean(
+    selectedEvent && currentUserId && selectedEvent.created_by === currentUserId
+  );
 
-  // Toggle Checkin for attendee
-  const handleToggleCheckin = (regId: string) => {
-    const all = getStoredRegistrations();
-    const updated = all.map((r) => {
-      if (r.id === regId) {
-        return {
-          ...r,
-          checked_in_at: r.checked_in_at ? null : new Date().toISOString(),
-        };
+  // Fallback tab if non-owner is in an admin-only tab
+  useEffect(() => {
+    if (!isOwner && (detailTab === "validadores" || detailTab === "cargar_excel" || detailTab === "registrar_manual")) {
+      setDetailTab("asistentes");
+    }
+  }, [isOwner, detailTab]);
+
+  // Toggle Checkin for attendee via server-side verification
+  const handleToggleCheckin = async (reg: RegistrationItem) => {
+    if (!selectedEvent) return;
+    if (reg.checked_in_at) {
+      alert("La asistencia de este participante ya fue confirmada previamente.");
+      return;
+    }
+    const res = await scanEventQRWithSupabase(selectedEvent.id, reg.qr_token);
+    alert(res.message);
+    loadRegistrations(selectedEvent.id);
+  };
+
+  // Delete attendee (only allowed for owner)
+  const handleDeleteAttendee = async (regId: string) => {
+    if (!isOwner) {
+      alert("Solo el creador del evento puede eliminar participantes.");
+      return;
+    }
+    if (!confirm("¿Deseas eliminar este registro de participante?")) return;
+    try {
+      const supabase = createClient();
+      await supabase.from("event_registrations").delete().eq("id", regId);
+      if (selectedEventId) {
+        loadRegistrations(selectedEventId);
       }
-      return r;
-    });
-    saveRegistrations(updated);
-    if (selectedEventId) {
-      const filtered = updated.filter((r) => r.event_id === selectedEventId);
-      setRegistrations(filtered);
-      setStats(calculateEventStats(selectedEventId, filtered));
+    } catch (e) {
+      alert("Error al eliminar participante: " + String(e));
     }
   };
 
-  // Delete attendee
-  const handleDeleteAttendee = (regId: string) => {
-    if (!confirm("¿Deseas eliminar este registro de participante?")) return;
-    const all = getStoredRegistrations();
-    const updated = all.filter((r) => r.id !== regId);
-    saveRegistrations(updated);
-    if (selectedEventId) {
-      const filtered = updated.filter((r) => r.event_id === selectedEventId);
-      setRegistrations(filtered);
-      setStats(calculateEventStats(selectedEventId, filtered));
-    }
+  // Secure Server-Side Excel Export
+  const handleExportAttendance = () => {
+    if (!selectedEvent) return;
+    window.open(`/api/eventos/${selectedEvent.id}/export`, "_blank");
   };
 
   // Open QR modal
@@ -500,6 +518,18 @@ function DashboardContent() {
                       <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
                       {selectedEvent.status.toUpperCase()}
                     </span>
+
+                    {/* Role Badge */}
+                    <span
+                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-mono font-medium ${
+                        isOwner
+                          ? "bg-indigo-500/10 text-indigo-300 border border-indigo-500/20"
+                          : "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
+                      }`}
+                    >
+                      <ShieldCheck className="h-3 w-3" />
+                      {isOwner ? "Creador del Evento" : "Validador Autorizado"}
+                    </span>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-4 text-xs text-zinc-400">
@@ -520,8 +550,9 @@ function DashboardContent() {
                 {/* Quick Action Buttons */}
                 <div className="flex flex-wrap items-center gap-2">
                   <button
-                    onClick={() => exportAttendanceToExcel(registrations, selectedEvent.name)}
+                    onClick={handleExportAttendance}
                     className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-3.5 py-2 text-xs font-medium text-zinc-200 hover:bg-white/[0.08] hover:text-white transition-colors"
+                    title="Exportar archivo Excel verificado en servidor"
                   >
                     <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-400" />
                     <span>Exportar Excel</span>
@@ -585,29 +616,45 @@ function DashboardContent() {
                 <span>Lista de Asistentes ({registrations.length})</span>
               </button>
 
-              <button
-                onClick={() => setDetailTab("cargar_excel")}
-                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
-                  detailTab === "cargar_excel"
-                    ? "border-white text-white"
-                    : "border-transparent text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                <Upload className="h-3.5 w-3.5 text-emerald-400" />
-                <span>Cargar desde Excel</span>
-              </button>
+              {isOwner && (
+                <>
+                  <button
+                    onClick={() => setDetailTab("cargar_excel")}
+                    className={`flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
+                      detailTab === "cargar_excel"
+                        ? "border-white text-white"
+                        : "border-transparent text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    <Upload className="h-3.5 w-3.5 text-emerald-400" />
+                    <span>Cargar desde Excel</span>
+                  </button>
 
-              <button
-                onClick={() => setDetailTab("registrar_manual")}
-                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
-                  detailTab === "registrar_manual"
-                    ? "border-white text-white"
-                    : "border-transparent text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                <UserPlus className="h-3.5 w-3.5" />
-                <span>Registrar Manualmente</span>
-              </button>
+                  <button
+                    onClick={() => setDetailTab("registrar_manual")}
+                    className={`flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
+                      detailTab === "registrar_manual"
+                        ? "border-white text-white"
+                        : "border-transparent text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    <UserPlus className="h-3.5 w-3.5" />
+                    <span>Registrar Manualmente</span>
+                  </button>
+
+                  <button
+                    onClick={() => setDetailTab("validadores")}
+                    className={`flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
+                      detailTab === "validadores"
+                        ? "border-white text-white"
+                        : "border-transparent text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5 text-indigo-400" />
+                    <span>Equipo & Validadores</span>
+                  </button>
+                </>
+              )}
 
               <button
                 onClick={() => setDetailTab("escanear")}
@@ -726,7 +773,18 @@ function DashboardContent() {
                               </td>
                               <td className="py-3 px-4 text-right">
                                 <div className="inline-flex items-center gap-2">
-                                  {/* View QR */}
+                                  {/* View Digital Ticket */}
+                                  <Link
+                                    href={`/ticket/${reg.qr_token}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="rounded border border-white/10 bg-white/[0.05] p-1.5 text-zinc-300 hover:text-white hover:bg-white/[0.1] transition-colors"
+                                    title="Abrir Pase Digital de Invitado"
+                                  >
+                                    <ExternalLink className="h-3.5 w-3.5" />
+                                  </Link>
+
+                                  {/* View QR Modal */}
                                   <button
                                     onClick={() => handleOpenQRModal(reg)}
                                     className="rounded border border-white/10 bg-white/[0.05] p-1.5 text-zinc-300 hover:text-white hover:bg-white/[0.1] transition-colors"
@@ -737,25 +795,27 @@ function DashboardContent() {
 
                                   {/* Toggle Attendance */}
                                   <button
-                                    onClick={() => handleToggleCheckin(reg.id)}
+                                    onClick={() => handleToggleCheckin(reg)}
                                     className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
                                       reg.checked_in_at
                                         ? "bg-zinc-800 text-zinc-400 hover:text-white"
                                         : "bg-emerald-500 text-black font-semibold hover:bg-emerald-400"
                                     }`}
-                                    title="Alternar estado de ingreso"
+                                    title="Validar asistencia en servidor"
                                   >
-                                    {reg.checked_in_at ? "Desmarcar" : "Check-in"}
+                                    {reg.checked_in_at ? "Registrado" : "Check-in"}
                                   </button>
 
-                                  {/* Delete */}
-                                  <button
-                                    onClick={() => handleDeleteAttendee(reg.id)}
-                                    className="rounded p-1.5 text-zinc-500 hover:text-red-400 transition-colors"
-                                    title="Eliminar"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
+                                  {/* Delete (Only Owner) */}
+                                  {isOwner && (
+                                    <button
+                                      onClick={() => handleDeleteAttendee(reg.id)}
+                                      className="rounded p-1.5 text-zinc-500 hover:text-red-400 transition-colors"
+                                      title="Eliminar participante"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
                                 </div>
                               </td>
                             </tr>
@@ -769,7 +829,7 @@ function DashboardContent() {
             )}
 
             {/* TAB CONTENT 2: UPLOAD EXCEL */}
-            {detailTab === "cargar_excel" && (
+            {detailTab === "cargar_excel" && isOwner && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <p className="text-xs text-zinc-400">
@@ -796,7 +856,7 @@ function DashboardContent() {
             )}
 
             {/* TAB CONTENT 3: MANUAL REGISTRATION */}
-            {detailTab === "registrar_manual" && (
+            {detailTab === "registrar_manual" && isOwner && (
               <div className="space-y-4">
                 <QRGenerator
                   events={[selectedEvent]}
@@ -804,6 +864,17 @@ function DashboardContent() {
                   onAttendeeAdded={() => {
                     loadRegistrations(selectedEvent.id);
                   }}
+                />
+              </div>
+            )}
+
+            {/* TAB CONTENT 4: VALIDATORS & TEAM */}
+            {detailTab === "validadores" && isOwner && (
+              <div className="space-y-4">
+                <EventTeamManager
+                  eventId={selectedEvent.id}
+                  isOwner={isOwner}
+                  eventName={selectedEvent.name}
                 />
               </div>
             )}

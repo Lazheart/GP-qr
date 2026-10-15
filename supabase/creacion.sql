@@ -2,6 +2,7 @@
 -- SISTEMA MULTIUSUARIO DE ASISTENCIA POR QR
 -- Next.js + Vercel + Supabase (PostgreSQL + Supabase Auth)
 -- Ejecutar una sola vez en un proyecto Supabase NUEVO.
+-- Todos los eventos son privados: no existe acceso público a eventos ni invitados.
 -- =============================================================
 
 begin;
@@ -36,9 +37,9 @@ create index events_status_idx on public.events(status);
 create index events_ends_at_idx on public.events(ends_at);
 
 -- -------------------------------------------------------------
--- 2. PERSONAL AUTORIZADO PARA CADA EVENTO
--- Solo el creador del evento puede designar o retirar escaneadores.
--- El usuario designado debe existir en Supabase Auth.
+-- 2. VALIDADORES AUTORIZADOS PARA CADA EVENTO
+-- Solo el creador puede asignar o retirar validadores.
+-- Los validadores son usuarios registrados de la aplicación.
 -- -------------------------------------------------------------
 create table public.event_members (
     id uuid primary key default gen_random_uuid(),
@@ -57,6 +58,33 @@ create table public.event_members (
 create index event_members_user_active_idx
     on public.event_members(user_id, active);
 create index event_members_event_idx on public.event_members(event_id);
+
+-- Invitaciones por correo para convertir usuarios registrados en validadores.
+-- El token solo permite aceptar la invitación; no concede acceso público al evento.
+create table public.event_member_invitations (
+    id uuid primary key default gen_random_uuid(),
+    event_id uuid not null references public.events(id) on delete cascade,
+    invited_email text not null,
+    invitation_token uuid not null unique default gen_random_uuid(),
+    status text not null default 'pending'
+        check (status in ('pending', 'accepted', 'revoked', 'expired')),
+    invited_by uuid not null default auth.uid()
+        references auth.users(id) on delete restrict,
+    accepted_by uuid references auth.users(id) on delete set null,
+    expires_at timestamptz not null default (now() + interval '7 days'),
+    accepted_at timestamptz,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    constraint event_invitation_email_not_empty
+        check (char_length(trim(invited_email)) > 3),
+    constraint event_invitation_email_normalized
+        check (invited_email = lower(trim(invited_email)))
+);
+
+create index event_member_invitations_event_idx
+    on public.event_member_invitations(event_id);
+create index event_member_invitations_email_idx
+    on public.event_member_invitations(invited_email, status);
 
 -- -------------------------------------------------------------
 -- 3. PARTICIPANTES INSCRITOS
@@ -163,7 +191,7 @@ create index archived_registrations_attendees_idx
     where checked_in_at is not null;
 
 -- -------------------------------------------------------------
--- 6. updated_at AUTOMÁTICO
+-- 6. updated_at AUTOMÁTICO Y PROTECCIÓN DE CAMPOS SENSIBLES
 -- -------------------------------------------------------------
 create or replace function public.set_updated_at()
 returns trigger
@@ -184,9 +212,51 @@ create trigger event_members_set_updated_at
 before update on public.event_members
 for each row execute function public.set_updated_at();
 
+create trigger event_member_invitations_set_updated_at
+before update on public.event_member_invitations
+for each row execute function public.set_updated_at();
+
 create trigger event_registrations_set_updated_at
 before update on public.event_registrations
 for each row execute function public.set_updated_at();
+
+-- Protección para evitar alterar propietarios o transferir registros
+create or replace function public.protect_event_sensitive_fields()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+    if new.created_by <> old.created_by then
+        raise exception 'No se permite transferir la propiedad del evento.';
+    end if;
+    return new;
+end;
+$$;
+
+create trigger events_protect_sensitive_fields
+before update on public.events
+for each row execute function public.protect_event_sensitive_fields();
+
+create or replace function public.protect_registration_sensitive_fields()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+    if new.event_id <> old.event_id then
+        raise exception 'No se permite transferir una inscripción a otro evento.';
+    end if;
+    if new.registered_by <> old.registered_by then
+        raise exception 'No se permite modificar el creador original de la inscripción.';
+    end if;
+    return new;
+end;
+$$;
+
+create trigger event_registrations_protect_sensitive_fields
+before update on public.event_registrations
+for each row execute function public.protect_registration_sensitive_fields();
 
 -- -------------------------------------------------------------
 -- 7. FUNCIONES DE AUTORIZACIÓN PARA RLS
@@ -234,6 +304,7 @@ grant execute on function public.can_scan_event(uuid) to authenticated;
 -- -------------------------------------------------------------
 alter table public.events enable row level security;
 alter table public.event_members enable row level security;
+alter table public.event_member_invitations enable row level security;
 alter table public.event_registrations enable row level security;
 alter table public.attendance_logs enable row level security;
 alter table public.archived_events enable row level security;
@@ -268,13 +339,8 @@ create policy "Owners read event members"
 on public.event_members for select to authenticated
 using (public.owns_event(event_id) or user_id = (select auth.uid()));
 
-create policy "Owners assign scanners"
-on public.event_members for insert to authenticated
-with check (
-    public.owns_event(event_id)
-    and assigned_by = (select auth.uid())
-    and role = 'scanner'
-);
+-- La asignación de validadores se realiza mediante accept_event_member_invitation().
+-- No se permite insertar validadores directamente desde el cliente.
 
 create policy "Owners update scanner assignments"
 on public.event_members for update to authenticated
@@ -285,9 +351,32 @@ create policy "Owners remove scanner assignments"
 on public.event_members for delete to authenticated
 using (public.owns_event(event_id));
 
-create policy "Owners read event registrations"
-on public.event_registrations for select to authenticated
+create policy "Owners read validator invitations"
+on public.event_member_invitations for select to authenticated
 using (public.owns_event(event_id));
+
+create policy "Owners create validator invitations"
+on public.event_member_invitations for insert to authenticated
+with check (
+    public.owns_event(event_id)
+    and invited_by = (select auth.uid())
+    and status = 'pending'
+    and accepted_by is null
+    and accepted_at is null
+);
+
+create policy "Owners update validator invitations"
+on public.event_member_invitations for update to authenticated
+using (public.owns_event(event_id))
+with check (public.owns_event(event_id));
+
+create policy "Owners revoke validator invitations"
+on public.event_member_invitations for delete to authenticated
+using (public.owns_event(event_id));
+
+create policy "Owners and validators read event registrations"
+on public.event_registrations for select to authenticated
+using (public.can_scan_event(event_id));
 
 create policy "Owners register participants"
 on public.event_registrations for insert to authenticated
@@ -305,22 +394,25 @@ create policy "Owners delete event registrations"
 on public.event_registrations for delete to authenticated
 using (public.owns_event(event_id));
 
-create policy "Owners read attendance logs"
+create policy "Owners and validators read attendance logs"
 on public.attendance_logs for select to authenticated
-using (public.owns_event(event_id));
+using (event_id is not null and public.can_scan_event(event_id));
 
-create policy "Owners read archived events"
+create policy "Owners and validators read archived events"
 on public.archived_events for select to authenticated
-using (created_by = (select auth.uid()));
+using (public.can_scan_event(event_id));
 
-create policy "Owners read archived registrations"
+create policy "Owners and validators read archived registrations"
 on public.archived_registrations for select to authenticated
-using (public.owns_event(event_id));
+using (public.can_scan_event(event_id));
 
+-- No hay acceso anónimo a eventos, invitados, QR ni asistencias.
+-- Los invitados reciben su QR por un canal privado y no consultan estas tablas.
 -- No se permite insertar/editar asistencia directamente desde el cliente.
--- La función scan_event_qr valida permisos y marca la asistencia de forma atómica.
+-- scan_event_qr valida al creador/validador y registra asistencia de forma atómica.
 revoke all on public.events from anon, authenticated;
 revoke all on public.event_members from anon, authenticated;
+revoke all on public.event_member_invitations from anon, authenticated;
 revoke all on public.event_registrations from anon, authenticated;
 revoke all on public.attendance_logs from anon, authenticated;
 revoke all on public.archived_events from anon, authenticated;
@@ -328,13 +420,219 @@ revoke all on public.archived_registrations from anon, authenticated;
 
 grant select, insert, update, delete on public.events to authenticated;
 grant select, insert, update, delete on public.event_members to authenticated;
+grant select, insert, update, delete on public.event_member_invitations to authenticated;
 grant select, insert, update, delete on public.event_registrations to authenticated;
 grant select on public.attendance_logs to authenticated;
 grant select on public.archived_events, public.archived_registrations to authenticated;
 grant usage, select on sequence public.attendance_logs_id_seq to authenticated;
 
 -- -------------------------------------------------------------
--- 9. VALIDAR QR Y REGISTRAR ASISTENCIA
+-- 9. ACEPTAR INVITACIÓN DE VALIDADOR
+-- El enlace lleva el token. Solo el usuario autenticado cuyo correo
+-- coincide con el destinatario puede aceptar y obtener acceso.
+-- -------------------------------------------------------------
+create or replace function public.accept_event_member_invitation(
+    p_invitation_token uuid
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+    v_user_id uuid := auth.uid();
+    v_email text := lower(trim(coalesce(nullif(auth.jwt() ->> 'email', ''), (select email from auth.users where id = auth.uid()), '')));
+    v_invitation public.event_member_invitations%rowtype;
+    v_member_id uuid;
+begin
+    if v_user_id is null or v_email = '' then
+        raise exception 'Debes iniciar sesión con la cuenta invitada.'
+            using errcode = '28000';
+    end if;
+
+    select i.* into v_invitation
+    from public.event_member_invitations i
+    where i.invitation_token = p_invitation_token
+    for update;
+
+    if not found then
+        raise exception 'La invitación no existe o no es válida.';
+    end if;
+    if v_invitation.status <> 'pending' then
+        raise exception 'La invitación ya no está pendiente.';
+    end if;
+    if v_invitation.expires_at <= now() then
+        update public.event_member_invitations
+        set status = 'expired', updated_at = now()
+        where id = v_invitation.id;
+        raise exception 'La invitación ha expirado.';
+    end if;
+    if v_invitation.invited_email <> v_email then
+        raise exception 'Inicia sesión con el correo al que se envió la invitación.'
+            using errcode = '42501';
+    end if;
+
+    insert into public.event_members (
+        event_id, user_id, role, assigned_by, active
+    )
+    values (
+        v_invitation.event_id, v_user_id, 'scanner',
+        v_invitation.invited_by, true
+    )
+    on conflict (event_id, user_id)
+    do update set active = true, role = 'scanner', updated_at = now()
+    returning id into v_member_id;
+
+    update public.event_member_invitations
+    set status = 'accepted', accepted_by = v_user_id, accepted_at = now(), updated_at = now()
+    where id = v_invitation.id;
+
+    return v_member_id;
+end;
+$$;
+
+revoke all on function public.accept_event_member_invitation(uuid) from public, anon;
+grant execute on function public.accept_event_member_invitation(uuid) to authenticated;
+
+-- Consulta segura de detalles de invitación (sin revelar el evento a terceros)
+create or replace function public.get_invitation_details(
+    p_invitation_token uuid
+)
+returns table (
+    invitation_id uuid,
+    event_id uuid,
+    event_name text,
+    event_location text,
+    starts_at timestamptz,
+    ends_at timestamptz,
+    invited_email text,
+    status text,
+    expires_at timestamptz,
+    is_valid boolean
+)
+language sql
+security definer
+stable
+set search_path = ''
+as $$
+    select
+        i.id as invitation_id,
+        e.id as event_id,
+        e.name as event_name,
+        e.location as event_location,
+        e.starts_at,
+        e.ends_at,
+        i.invited_email,
+        i.status,
+        i.expires_at,
+        (i.status = 'pending' and i.expires_at > now() and e.status in ('draft', 'open')) as is_valid
+    from public.event_member_invitations i
+    join public.events e on e.id = i.event_id
+    where i.invitation_token = p_invitation_token;
+$$;
+
+revoke all on function public.get_invitation_details(uuid) from public;
+grant execute on function public.get_invitation_details(uuid) to anon, authenticated;
+
+-- Revocación controlada de invitaciones de validador por el creador
+create or replace function public.revoke_validator_invitation(
+    p_invitation_id uuid
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+    v_event_id uuid;
+begin
+    select event_id into v_event_id
+    from public.event_member_invitations
+    where id = p_invitation_id;
+
+    if not found or not public.owns_event(v_event_id) then
+        raise exception 'No autorizado para revocar esta invitación.'
+            using errcode = '42501';
+    end if;
+
+    update public.event_member_invitations
+    set status = 'revoked', updated_at = now()
+    where id = p_invitation_id and status = 'pending';
+
+    return found;
+end;
+$$;
+
+revoke all on function public.revoke_validator_invitation(uuid) from public, anon;
+grant execute on function public.revoke_validator_invitation(uuid) to authenticated;
+
+-- Retiro controlado de validadores autorizados por el creador
+create or replace function public.revoke_event_validator(
+    p_event_id uuid,
+    p_member_id uuid
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+    if not public.owns_event(p_event_id) then
+        raise exception 'Solo el creador del evento puede retirar validadores.'
+            using errcode = '42501';
+    end if;
+
+    update public.event_members
+    set active = false, updated_at = now()
+    where id = p_member_id and event_id = p_event_id;
+
+    return found;
+end;
+$$;
+
+revoke all on function public.revoke_event_validator(uuid, uuid) from public, anon;
+grant execute on function public.revoke_event_validator(uuid, uuid) to authenticated;
+
+-- Consulta mínima del ticket para invitados (no expone base de datos ni otros asistentes)
+create or replace function public.get_ticket_info(
+    p_qr_token uuid
+)
+returns table (
+    registration_id uuid,
+    event_name text,
+    event_location text,
+    starts_at timestamptz,
+    ends_at timestamptz,
+    participant_name text,
+    status text,
+    is_checked_in boolean,
+    checked_in_at timestamptz
+)
+language sql
+security definer
+stable
+set search_path = ''
+as $$
+    select
+        r.id as registration_id,
+        e.name as event_name,
+        e.location as event_location,
+        e.starts_at,
+        e.ends_at,
+        r.full_name as participant_name,
+        r.status,
+        (r.checked_in_at is not null) as is_checked_in,
+        r.checked_in_at
+    from public.event_registrations r
+    join public.events e on e.id = r.event_id
+    where r.qr_token = p_qr_token;
+$$;
+
+revoke all on function public.get_ticket_info(uuid) from public;
+grant execute on function public.get_ticket_info(uuid) to anon, authenticated;
+
+-- -------------------------------------------------------------
+-- 10. VALIDAR QR Y REGISTRAR ASISTENCIA
 -- Solo propietario o escaneador activo asignado puede llamar la función.
 -- La actualización condicional impide aceptar dos escaneos simultáneos.
 -- -------------------------------------------------------------
@@ -427,7 +725,7 @@ revoke all on function public.scan_event_qr(uuid, uuid) from public, anon;
 grant execute on function public.scan_event_qr(uuid, uuid) to authenticated;
 
 -- -------------------------------------------------------------
--- 10. ARCHIVAR EVENTOS UNA SEMANA DESPUÉS DE SU FINALIZACIÓN
+-- 11. ARCHIVAR EVENTOS UNA SEMANA DESPUÉS DE SU FINALIZACIÓN
 -- Copia evento + inscripciones a las tablas históricas y marca el
 -- evento como archivado. La operación es idempotente y conserva el
 -- original para auditoría y exportación.
@@ -488,8 +786,11 @@ end;
 $$;
 
 revoke all on function public.archive_finished_events() from public, anon, authenticated;
--- La función de archivo debe ejecutarse desde un job confiable (Supabase Cron
--- o una Vercel Cron Route protegida), no desde el navegador.
+-- La función de archivo debe ejecutarse exclusivamente desde un job confiable
+-- (Supabase pg_cron o Vercel Cron Route protegida con CRON_SECRET).
 grant execute on function public.archive_finished_events() to service_role;
+
+-- Para programar en Supabase con pg_cron (ejecutar en SQL Editor de Supabase si la extensión pg_cron está disponible):
+-- select cron.schedule('archive-finished-events-daily', '0 3 * * *', 'select public.archive_finished_events()');
 
 commit;

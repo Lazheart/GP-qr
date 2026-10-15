@@ -64,6 +64,31 @@ export interface EventStats {
   attendanceRate: number;
 }
 
+export interface EventMemberItem {
+  id: string;
+  event_id: string;
+  user_id: string;
+  role: "scanner";
+  active: boolean;
+  assigned_by: string;
+  created_at: string;
+  updated_at?: string;
+  email?: string;
+}
+
+export interface EventMemberInvitationItem {
+  id: string;
+  event_id: string;
+  invited_email: string;
+  invitation_token: string;
+  status: "pending" | "accepted" | "revoked" | "expired";
+  invited_by: string;
+  accepted_by?: string | null;
+  expires_at: string;
+  created_at: string;
+  accepted_at?: string | null;
+}
+
 export interface ScanResultResponse {
   result: ScanResult;
   message: string;
@@ -225,57 +250,141 @@ export async function scanEventQRWithSupabase(
   qrToken: string
 ): Promise<ScanResultResponse> {
   const token = qrToken.trim();
+  const now = new Date().toISOString();
+
+  if (!isValidUUID(eventId) || !isValidUUID(token)) {
+    return {
+      result: "invalid_qr",
+      message: "El código QR es inválido o no tiene el formato esperado.",
+      scannedAt: now,
+    };
+  }
 
   try {
     const supabase = createClient();
+    const { data, error } = await supabase.rpc("scan_event_qr", {
+      p_event_id: eventId,
+      p_qr_token: token,
+    });
 
-    // Call Supabase RPC scan_event_qr(p_event_id uuid, p_qr_token uuid)
-    if (isValidUUID(token) && isValidUUID(eventId)) {
-      const { data, error } = await supabase.rpc("scan_event_qr", {
-        p_event_id: eventId,
-        p_qr_token: token,
-      });
-
-      if (!error && data && data.length > 0) {
-        const row = data[0];
-        const resType = row.scan_result as ScanResult;
-        let msg = "";
-        switch (resType) {
-          case "accepted":
-            msg = `¡Asistencia confirmada para ${row.participant_name || "Participante"}!`;
-            break;
-          case "already_attended":
-            msg = `¡Atención! Asistencia ya registrada previamente para ${row.participant_name || "Participante"}.`;
-            break;
-          case "invalid_qr":
-            msg = "El código QR es inválido o no pertenece a este evento.";
-            break;
-          case "cancelled_registration":
-            msg = "La inscripción para este participante está cancelada.";
-            break;
-          case "event_not_open":
-            msg = "El evento no se encuentra en estado abierto.";
-            break;
-          case "not_authorized":
-            msg = "No tienes permisos de escáner para este evento.";
-            break;
-          default:
-            msg = `Resultado: ${resType}`;
-        }
-        return {
-          result: resType,
-          message: msg,
-          scannedAt: row.scanned_at || new Date().toISOString(),
-          participant_name: row.participant_name,
-        };
-      }
+    if (error) {
+      return {
+        result: "not_authorized",
+        message: error.message || "Error al validar la credencial.",
+        scannedAt: now,
+      };
     }
-  } catch (err) {
-    console.warn("RPC scan_event_qr failed, using local verification fallback:", err);
-  }
 
-  // Graceful fallback to client verification logic
-  return processScanToken(eventId, token);
+    if (!data || data.length === 0) {
+      return {
+        result: "invalid_qr",
+        message: "El código QR no fue reconocido.",
+        scannedAt: now,
+      };
+    }
+
+    const row = data[0];
+    const resType = row.scan_result as ScanResult;
+    let msg = "";
+    switch (resType) {
+      case "accepted":
+        msg = `¡Asistencia confirmada para ${row.participant_name || "Participante"}!`;
+        break;
+      case "already_attended":
+        msg = `¡Atención! Asistencia ya registrada previamente para ${row.participant_name || "Participante"}.`;
+        break;
+      case "invalid_qr":
+        msg = "El código QR es inválido o no pertenece a este evento.";
+        break;
+      case "cancelled_registration":
+        msg = "La inscripción para este participante está cancelada.";
+        break;
+      case "event_not_open":
+        msg = "El evento no se encuentra en estado abierto.";
+        break;
+      case "not_authorized":
+        msg = "No tienes permisos de escáner para este evento.";
+        break;
+      default:
+        msg = `Resultado: ${resType}`;
+    }
+
+    return {
+      result: resType,
+      message: msg,
+      scannedAt: row.scanned_at || now,
+      participant_name: row.participant_name,
+    };
+  } catch (err) {
+    return {
+      result: "not_authorized",
+      message: "Error de conexión al validar código QR.",
+      scannedAt: now,
+    };
+  }
+}
+
+/**
+ * Gestión de Validadores e Invitaciones de Equipo
+ */
+export async function fetchEventTeam(
+  eventId: string
+): Promise<{ invitations: EventMemberInvitationItem[]; members: EventMemberItem[]; error: string | null }> {
+  try {
+    const res = await fetch(`/api/invitaciones?event_id=${eventId}`);
+    const data = await res.json();
+    if (!res.ok) {
+      return { invitations: [], members: [], error: data.error || "Error al cargar equipo" };
+    }
+    return { invitations: data.invitations || [], members: data.members || [], error: null };
+  } catch (err) {
+    return { invitations: [], members: [], error: String(err) };
+  }
+}
+
+export async function inviteValidatorToEvent(
+  eventId: string,
+  email: string
+): Promise<{ success: boolean; message?: string; error?: string; invitation_url?: string }> {
+  try {
+    const res = await fetch("/api/invitaciones", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event_id: eventId, email }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || "Error al invitar validador" };
+    }
+    return { success: true, message: data.message, invitation_url: data.invitation_url };
+  } catch (err) {
+    return { success: false, error: String(err) };
+  }
+}
+
+export async function revokeInvitationOrValidator(params: {
+  eventId: string;
+  invitationId?: string;
+  memberId?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const res = await fetch("/api/invitaciones/revocar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event_id: params.eventId,
+        invitation_id: params.invitationId,
+        member_id: params.memberId,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || "Error al revocar acceso" };
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: String(err) };
+  }
 }
 
 /**

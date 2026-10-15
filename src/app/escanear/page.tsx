@@ -5,18 +5,30 @@ import Link from "next/link";
 import { ArrowLeft, ShieldCheck, ScanLine } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { QRScanner } from "@/components/QRScanner";
-import { getStoredEvents, EventItem } from "@/lib/db";
+import { fetchEventsFromSupabase, getStoredEvents, EventItem } from "@/lib/db";
 
 export default function EscanearPage() {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string>("");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const loaded = getStoredEvents();
-    setEvents(loaded);
-    if (loaded.length > 0) {
-      setSelectedEventId(loaded[0].id);
+    async function loadAuthorizedEvents() {
+      setLoading(true);
+      const { data, error } = await fetchEventsFromSupabase();
+      if (!error && data && data.length > 0) {
+        setEvents(data);
+        setSelectedEventId(data[0].id);
+      } else {
+        const local = getStoredEvents();
+        setEvents(local);
+        if (local.length > 0) {
+          setSelectedEventId(local[0].id);
+        }
+      }
+      setLoading(false);
     }
+    loadAuthorizedEvents();
   }, []);
 
   return (
