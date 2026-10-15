@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -8,7 +8,6 @@ import {
   ArrowLeft,
   Mail,
   Lock,
-  ArrowRight,
   Loader2,
   AlertCircle,
   CheckCircle2,
@@ -30,6 +29,7 @@ export default function AuthPage() {
   const [isRedirecting, setIsRedirecting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const registerTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Check if already authenticated
   useEffect(() => {
@@ -60,11 +60,18 @@ export default function AuthPage() {
 
     return () => {
       isMounted = false;
+      if (registerTimerRef.current) {
+        clearTimeout(registerTimerRef.current);
+      }
     };
   }, [router]);
 
   // Primary toggle function to swipe/switch between login and register
   const toggleAuthMode = () => {
+    if (registerTimerRef.current) {
+      clearTimeout(registerTimerRef.current);
+      registerTimerRef.current = null;
+    }
     setErrorMessage(null);
     setSuccessMessage(null);
     setAuthMode((prev) => (prev === "login" ? "register" : "login"));
@@ -72,6 +79,10 @@ export default function AuthPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (registerTimerRef.current) {
+      clearTimeout(registerTimerRef.current);
+      registerTimerRef.current = null;
+    }
     setErrorMessage(null);
     setSuccessMessage(null);
 
@@ -133,31 +144,26 @@ export default function AuthPage() {
           throw error;
         }
 
-        if (data.user) {
-          if (typeof window !== "undefined" && data.user.email) {
-            sessionStorage.setItem("user_email", data.user.email);
-          }
-          if (data.session) {
-            setIsRedirecting(true);
-            setSuccessMessage("¡Cuenta creada exitosamente! Accediendo...");
-            router.replace("/dashboard");
-            setTimeout(() => {
-              if (window.location.pathname !== "/dashboard") {
-                window.location.assign("/dashboard");
-              }
-            }, 1200);
-            return;
-          } else {
-            setSuccessMessage(
-              "Revisa tu bandeja de correo para confirmar tu registro, o continúa al panel."
-            );
-            setTimeout(() => {
-              setIsRedirecting(true);
-              router.replace("/dashboard");
-            }, 600);
-            return;
-          }
+        // Si supabase auto-inició sesión en cliente, cerramos sesión para que el usuario inicie sesión limpiamente
+        if (data?.session) {
+          await supabase.auth.signOut();
         }
+
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem("user_email", data.user?.email || email.trim());
+        }
+
+        setIsLoading(false);
+        setConfirmPassword("");
+        setSuccessMessage("¡Cuenta creada exitosamente! Cambiando a inicio de sesión...");
+
+        // Espera unos segundos y cambia a la pestaña de inicio de sesión
+        registerTimerRef.current = setTimeout(() => {
+          setAuthMode("login");
+          setSuccessMessage("¡Registro completado! Ingresa tus credenciales para acceder.");
+          registerTimerRef.current = null;
+        }, 2000);
+        return;
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Ocurrió un error al procesar la solicitud.";
