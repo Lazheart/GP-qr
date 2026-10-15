@@ -165,6 +165,52 @@ export async function createEventInSupabase(
   }
 }
 
+export async function updateEventInSupabase(
+  eventId: string,
+  updates: Partial<Pick<EventItem, "name" | "description" | "location" | "starts_at" | "ends_at" | "status" | "archived_at">>
+): Promise<{ data: EventItem | null; error: Error | null }> {
+  try {
+    const supabase = createClient();
+    const cleanUpdates: Record<string, any> = {};
+    if (updates.name !== undefined) cleanUpdates.name = updates.name.trim();
+    if (updates.description !== undefined) cleanUpdates.description = updates.description ? updates.description.trim() : null;
+    if (updates.location !== undefined) cleanUpdates.location = updates.location ? updates.location.trim() : null;
+    if (updates.starts_at !== undefined) cleanUpdates.starts_at = updates.starts_at;
+    if (updates.ends_at !== undefined) cleanUpdates.ends_at = updates.ends_at;
+    if (updates.status !== undefined) cleanUpdates.status = updates.status;
+    if (updates.archived_at !== undefined) cleanUpdates.archived_at = updates.archived_at;
+
+    const { data, error } = await supabase
+      .from("events")
+      .update(cleanUpdates)
+      .eq("id", eventId)
+      .select()
+      .single();
+
+    if (error) {
+      return { data: null, error: new Error(error.message) };
+    }
+    return { data: data as EventItem, error: null };
+  } catch (err) {
+    return { data: null, error: err as Error };
+  }
+}
+
+export async function deleteEventInSupabase(
+  eventId: string
+): Promise<{ success: boolean; error: Error | null }> {
+  try {
+    const supabase = createClient();
+    const { error } = await supabase.from("events").delete().eq("id", eventId);
+    if (error) {
+      return { success: false, error: new Error(error.message) };
+    }
+    return { success: true, error: null };
+  } catch (err) {
+    return { success: false, error: err as Error };
+  }
+}
+
 export async function fetchRegistrationsFromSupabase(
   eventId: string
 ): Promise<{ data: RegistrationItem[] | null; error: Error | null }> {

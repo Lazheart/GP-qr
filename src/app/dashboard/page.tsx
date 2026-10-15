@@ -31,6 +31,12 @@ import {
   ShieldCheck,
   Mail,
   Loader2,
+  MoreVertical,
+  Pencil,
+  Archive,
+  ArchiveRestore,
+  FileEdit,
+  PlayCircle,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -44,6 +50,8 @@ import {
   calculateEventStats,
   fetchEventsFromSupabase,
   createEventInSupabase,
+  updateEventInSupabase,
+  deleteEventInSupabase,
   fetchRegistrationsFromSupabase,
   scanEventQRWithSupabase,
   sendGuestTicketEmailAction,
@@ -92,6 +100,39 @@ function DashboardContent() {
   );
   const [newEventStatus, setNewEventStatus] = useState<"draft" | "open" | "closed">("open");
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Tabs for events list
+  const [eventsFilterTab, setEventsFilterTab] = useState<"activos" | "borradores" | "archivados" | "todos">("activos");
+  const [openMenuEventId, setOpenMenuEventId] = useState<string | null>(null);
+
+  // Edit Event Modal State
+  const [editingEvent, setEditingEvent] = useState<EventItem | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editLocation, setEditLocation] = useState("");
+  const [editStartsAt, setEditStartsAt] = useState("");
+  const [editEndsAt, setEditEndsAt] = useState("");
+  const [editStatus, setEditStatus] = useState<"draft" | "open" | "closed">("open");
+  const [editIsArchived, setEditIsArchived] = useState(false);
+  const [isUpdatingEvent, setIsUpdatingEvent] = useState(false);
+  const [editFormError, setEditFormError] = useState<string | null>(null);
+
+  // Close card menus when clicking outside
+  useEffect(() => {
+    const handleCloseMenu = () => setOpenMenuEventId(null);
+    window.addEventListener("click", handleCloseMenu);
+    return () => window.removeEventListener("click", handleCloseMenu);
+  }, []);
+
+  // Helper for local datetime string
+  const toDatetimeLocal = (isoStr?: string | null): string => {
+    if (!isoStr) return new Date().toISOString().slice(0, 16);
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return new Date().toISOString().slice(0, 16);
+    const offset = d.getTimezoneOffset();
+    const localDate = new Date(d.getTime() - offset * 60 * 1000);
+    return localDate.toISOString().slice(0, 16);
+  };
 
   // Load authenticated user info (middleware already guards access)
   useEffect(() => {
@@ -197,6 +238,140 @@ function DashboardContent() {
       setNewEventLocation("");
     } catch (err) {
       setFormError("No se pudo crear el evento: " + String(err));
+    }
+  };
+
+  // Open Edit Modal with event data
+  const handleOpenEditModal = (evt: EventItem) => {
+    setEditingEvent(evt);
+    setEditName(evt.name || "");
+    setEditDescription(evt.description || "");
+    setEditLocation(evt.location || "");
+    setEditStartsAt(toDatetimeLocal(evt.starts_at));
+    setEditEndsAt(toDatetimeLocal(evt.ends_at));
+    setEditStatus(evt.status === "cancelled" ? "closed" : evt.status);
+    setEditIsArchived(Boolean(evt.archived_at));
+    setEditFormError(null);
+    setOpenMenuEventId(null);
+  };
+
+  // Save Edited Event
+  const handleSaveEditEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingEvent) return;
+    setEditFormError(null);
+
+    if (!editName.trim()) {
+      setEditFormError("El nombre del evento es requerido.");
+      return;
+    }
+
+    if (new Date(editEndsAt) < new Date(editStartsAt)) {
+      setEditFormError("La fecha de término debe ser posterior a la de inicio.");
+      return;
+    }
+
+    setIsUpdatingEvent(true);
+    try {
+      const payload = {
+        name: editName.trim(),
+        description: editDescription.trim() || null,
+        location: editLocation.trim() || null,
+        starts_at: new Date(editStartsAt).toISOString(),
+        ends_at: new Date(editEndsAt).toISOString(),
+        status: editStatus,
+        archived_at: editIsArchived
+          ? (editingEvent.archived_at || new Date().toISOString())
+          : null,
+      };
+
+      const { data, error } = await updateEventInSupabase(editingEvent.id, payload);
+      if (error) {
+        setEditFormError("Error al actualizar evento: " + error.message);
+        setIsUpdatingEvent(false);
+        return;
+      }
+
+      const updatedItem: EventItem = data || {
+        ...editingEvent,
+        ...payload,
+        updated_at: new Date().toISOString(),
+      };
+
+      const updatedEvents = events.map((ev) =>
+        ev.id === editingEvent.id ? updatedItem : ev
+      );
+      setEvents(updatedEvents);
+      saveEvents(updatedEvents);
+      setEditingEvent(null);
+    } catch (err) {
+      setEditFormError("Error inesperado: " + String(err));
+    } finally {
+      setIsUpdatingEvent(false);
+    }
+  };
+
+  // Toggle Archive / Unarchive quickly from 3-dots menu
+  const handleToggleArchiveEvent = async (evt: EventItem, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setOpenMenuEventId(null);
+    const newArchivedAt = evt.archived_at ? null : new Date().toISOString();
+    const newStatus = !evt.archived_at && evt.status === "open" ? "closed" : evt.status;
+
+    try {
+      const { data, error } = await updateEventInSupabase(evt.id, {
+        archived_at: newArchivedAt,
+        status: newStatus,
+      });
+
+      const updatedItem: EventItem = data || {
+        ...evt,
+        archived_at: newArchivedAt,
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+      };
+
+      const updatedEvents = events.map((ev) =>
+        ev.id === evt.id ? updatedItem : ev
+      );
+      setEvents(updatedEvents);
+      saveEvents(updatedEvents);
+    } catch (err) {
+      alert("No se pudo actualizar el estado de archivo: " + String(err));
+    }
+  };
+
+  // Quick change status (e.g. Borrador, Abierto) from 3-dots menu
+  const handleQuickChangeStatus = async (
+    evt: EventItem,
+    newStatus: "draft" | "open" | "closed",
+    e?: React.MouseEvent
+  ) => {
+    e?.stopPropagation();
+    setOpenMenuEventId(null);
+    try {
+      const shouldUnarchive = newStatus !== "closed" && Boolean(evt.archived_at);
+      const updates = {
+        status: newStatus,
+        ...(shouldUnarchive ? { archived_at: null } : {}),
+      };
+
+      const { data, error } = await updateEventInSupabase(evt.id, updates);
+
+      const updatedItem: EventItem = data || {
+        ...evt,
+        status: newStatus,
+        archived_at: shouldUnarchive ? null : evt.archived_at,
+        updated_at: new Date().toISOString(),
+      };
+
+      const updatedEvents = events.map((ev) =>
+        ev.id === evt.id ? updatedItem : ev
+      );
+      setEvents(updatedEvents);
+      saveEvents(updatedEvents);
+    } catch (err) {
+      alert("No se pudo cambiar el estado del evento: " + String(err));
     }
   };
 
@@ -415,111 +590,368 @@ function DashboardContent() {
               </button>
             </div>
 
-            {/* Events Grid */}
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-xs font-mono uppercase tracking-wider text-zinc-400">
-                  Eventos Registrados ({events.length})
-                </span>
-                <span className="text-[11px] font-mono text-zinc-500">
-                  Haz clic en un evento para ver detalle, registrar o cargar Excel
-                </span>
+            {/* Events Tabs Navigation & Summary */}
+            <div className="space-y-4">
+              {/* Filter Tabs Bar */}
+              <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.08] pb-4">
+                <button
+                  type="button"
+                  onClick={() => setEventsFilterTab("activos")}
+                  className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-medium transition-all ${
+                    eventsFilterTab === "activos"
+                      ? "bg-white text-black shadow-md font-semibold"
+                      : "border border-white/10 bg-zinc-950/60 text-zinc-400 hover:text-white hover:bg-zinc-900"
+                  }`}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>Activos</span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-mono font-semibold ${
+                      eventsFilterTab === "activos"
+                        ? "bg-black/10 text-black"
+                        : "bg-white/10 text-zinc-300"
+                    }`}
+                  >
+                    {events.filter((e) => !e.archived_at && e.status !== "draft").length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setEventsFilterTab("borradores")}
+                  className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-medium transition-all ${
+                    eventsFilterTab === "borradores"
+                      ? "bg-amber-400 text-black shadow-md font-semibold"
+                      : "border border-white/10 bg-zinc-950/60 text-zinc-400 hover:text-white hover:bg-zinc-900"
+                  }`}
+                >
+                  <FileEdit className="h-3.5 w-3.5" />
+                  <span>Borradores</span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-mono font-semibold ${
+                      eventsFilterTab === "borradores"
+                        ? "bg-black/15 text-black"
+                        : "bg-white/10 text-zinc-300"
+                    }`}
+                  >
+                    {events.filter((e) => !e.archived_at && e.status === "draft").length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setEventsFilterTab("archivados")}
+                  className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-medium transition-all ${
+                    eventsFilterTab === "archivados"
+                      ? "bg-purple-500 text-white shadow-md font-semibold"
+                      : "border border-white/10 bg-zinc-950/60 text-zinc-400 hover:text-white hover:bg-zinc-900"
+                  }`}
+                >
+                  <Archive className="h-3.5 w-3.5" />
+                  <span>Archivados</span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-mono font-semibold ${
+                      eventsFilterTab === "archivados"
+                        ? "bg-white/20 text-white"
+                        : "bg-white/10 text-zinc-300"
+                    }`}
+                  >
+                    {events.filter((e) => Boolean(e.archived_at)).length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setEventsFilterTab("todos")}
+                  className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-medium transition-all ${
+                    eventsFilterTab === "todos"
+                      ? "bg-zinc-200 text-black shadow-md font-semibold"
+                      : "border border-white/10 bg-zinc-950/60 text-zinc-400 hover:text-white hover:bg-zinc-900"
+                  }`}
+                >
+                  <Layers className="h-3.5 w-3.5" />
+                  <span>Todos</span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-mono font-semibold ${
+                      eventsFilterTab === "todos"
+                        ? "bg-black/10 text-black"
+                        : "bg-white/10 text-zinc-300"
+                    }`}
+                  >
+                    {events.length}
+                  </span>
+                </button>
               </div>
 
-              {events.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-white/15 p-12 text-center bg-zinc-950/40">
-                  <Calendar className="mx-auto h-10 w-10 text-zinc-600 mb-3" />
-                  <h3 className="text-base font-semibold text-white">No tienes eventos creados aún</h3>
-                  <p className="mt-1 text-xs text-zinc-400 max-w-md mx-auto">
-                    Crea tu primer evento para comenzar a cargar participantes desde Excel o emitir credenciales QR.
-                  </p>
-                  <button
-                    onClick={() => setIsCreatingEvent(true)}
-                    className="mt-5 inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-xs font-semibold text-black hover:bg-zinc-200 transition-colors"
-                  >
-                    <Plus className="h-4 w-4" />
-                    <span>Crear Evento</span>
-                  </button>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                  {events.map((evt) => {
-                    const eventStats = calculateEventStats(evt.id);
-                    return (
-                      <div
-                        key={evt.id}
-                        onClick={() => setSelectedEventId(evt.id)}
-                        className="group relative flex flex-col justify-between rounded-xl border border-white/[0.1] bg-zinc-950/70 p-5 backdrop-blur-sm transition-all hover:border-white/30 hover:bg-zinc-900/50 cursor-pointer shadow-lg"
-                      >
-                        <div>
-                          {/* Status Badge */}
-                          <div className="flex items-center justify-between mb-3">
-                            <span
-                              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-mono font-medium ${
-                                evt.status === "open"
-                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                                  : evt.status === "draft"
-                                  ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                                  : "bg-red-500/10 text-red-400 border border-red-500/20"
-                              }`}
-                            >
-                              <span
-                                className={`h-1.5 w-1.5 rounded-full ${
-                                  evt.status === "open"
-                                    ? "bg-emerald-400 animate-pulse"
+              {/* Subtitle helper */}
+              <div className="flex items-center justify-between text-[11px] font-mono text-zinc-500">
+                <span>
+                  {eventsFilterTab === "activos" && "Mostrando eventos activos y abiertos para acreditación"}
+                  {eventsFilterTab === "borradores" && "Mostrando eventos en borrador en preparación"}
+                  {eventsFilterTab === "archivados" && "Mostrando eventos archivados fuera de circulación"}
+                  {eventsFilterTab === "todos" && "Mostrando historial completo de eventos registrados"}
+                </span>
+                <span>
+                  Haz clic en un evento para gestionarlo o usa los 3 puntos para opciones rápidas
+                </span>
+              </div>
+            </div>
+
+            {/* Events Grid */}
+            <div>
+              {(() => {
+                const displayedEvents = events.filter((e) => {
+                  if (eventsFilterTab === "activos") return !e.archived_at && e.status !== "draft";
+                  if (eventsFilterTab === "borradores") return !e.archived_at && e.status === "draft";
+                  if (eventsFilterTab === "archivados") return Boolean(e.archived_at);
+                  return true;
+                });
+
+                if (displayedEvents.length === 0) {
+                  return (
+                    <div className="rounded-2xl border border-dashed border-white/15 p-12 text-center bg-zinc-950/40">
+                      {eventsFilterTab === "borradores" ? (
+                        <>
+                          <FileEdit className="mx-auto h-10 w-10 text-amber-500/60 mb-3" />
+                          <h3 className="text-base font-semibold text-white">No tienes eventos en borrador</h3>
+                          <p className="mt-1 text-xs text-zinc-400 max-w-md mx-auto">
+                            Puedes guardar eventos como borrador mientras defines los detalles y el equipo.
+                          </p>
+                          <button
+                            onClick={() => {
+                              setNewEventStatus("draft");
+                              setIsCreatingEvent(true);
+                            }}
+                            className="mt-5 inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-xs font-semibold text-black hover:bg-zinc-200 transition-colors"
+                          >
+                            <Plus className="h-4 w-4" />
+                            <span>Crear Evento en Borrador</span>
+                          </button>
+                        </>
+                      ) : eventsFilterTab === "archivados" ? (
+                        <>
+                          <Archive className="mx-auto h-10 w-10 text-purple-400/60 mb-3" />
+                          <h3 className="text-base font-semibold text-white">No tienes eventos archivados</h3>
+                          <p className="mt-1 text-xs text-zinc-400 max-w-md mx-auto">
+                            Los eventos finalizados o que archives desde el menú de 3 puntos se mostrarán aquí.
+                          </p>
+                        </>
+                      ) : eventsFilterTab === "activos" ? (
+                        <>
+                          <Sparkles className="mx-auto h-10 w-10 text-emerald-400/60 mb-3" />
+                          <h3 className="text-base font-semibold text-white">No hay eventos activos en este momento</h3>
+                          <p className="mt-1 text-xs text-zinc-400 max-w-md mx-auto">
+                            Crea un evento nuevo o activa uno de tus borradores para comenzar con las acreditaciones.
+                          </p>
+                          <button
+                            onClick={() => {
+                              setNewEventStatus("open");
+                              setIsCreatingEvent(true);
+                            }}
+                            className="mt-5 inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-xs font-semibold text-black hover:bg-zinc-200 transition-colors"
+                          >
+                            <Plus className="h-4 w-4" />
+                            <span>Crear Evento Activo</span>
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <Calendar className="mx-auto h-10 w-10 text-zinc-600 mb-3" />
+                          <h3 className="text-base font-semibold text-white">No tienes eventos creados aún</h3>
+                          <p className="mt-1 text-xs text-zinc-400 max-w-md mx-auto">
+                            Crea tu primer evento para comenzar a cargar participantes desde Excel o emitir credenciales QR.
+                          </p>
+                          <button
+                            onClick={() => setIsCreatingEvent(true)}
+                            className="mt-5 inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-xs font-semibold text-black hover:bg-zinc-200 transition-colors"
+                          >
+                            <Plus className="h-4 w-4" />
+                            <span>Crear Evento</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {displayedEvents.map((evt) => {
+                      const eventStats = calculateEventStats(evt.id);
+                      const isEventOwner = Boolean(
+                        currentUserId && evt.created_by && evt.created_by === currentUserId
+                      ) || !evt.created_by;
+
+                      return (
+                        <div
+                          key={evt.id}
+                          onClick={() => setSelectedEventId(evt.id)}
+                          className="group relative flex flex-col justify-between rounded-xl border border-white/[0.1] bg-zinc-950/70 p-5 backdrop-blur-sm transition-all hover:border-white/30 hover:bg-zinc-900/50 cursor-pointer shadow-lg"
+                        >
+                          <div>
+                            {/* Card Top: Status Badges and 3-Dots Menu */}
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {evt.archived_at && (
+                                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-mono font-medium bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                                    <Archive className="h-3 w-3" />
+                                    Archivado
+                                  </span>
+                                )}
+
+                                <span
+                                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-mono font-medium ${
+                                    evt.status === "open"
+                                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                      : evt.status === "draft"
+                                      ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                                      : "bg-red-500/10 text-red-400 border border-red-500/20"
+                                  }`}
+                                >
+                                  <span
+                                    className={`h-1.5 w-1.5 rounded-full ${
+                                      evt.status === "open"
+                                        ? "bg-emerald-400 animate-pulse"
+                                        : evt.status === "draft"
+                                        ? "bg-amber-400"
+                                        : "bg-red-400"
+                                    }`}
+                                  />
+                                  {evt.status === "open"
+                                    ? "Abierto"
                                     : evt.status === "draft"
-                                    ? "bg-amber-400"
-                                    : "bg-red-400"
-                                }`}
-                              />
-                              {evt.status === "open"
-                                ? "Abierto"
-                                : evt.status === "draft"
-                                ? "Borrador"
-                                : "Cerrado"}
-                            </span>
+                                    ? "Borrador"
+                                    : "Cerrado"}
+                                </span>
+                              </div>
 
-                            <span className="text-[10px] font-mono text-zinc-500">
-                              {new Date(evt.starts_at).toLocaleDateString()}
-                            </span>
-                          </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-mono text-zinc-500">
+                                  {new Date(evt.starts_at).toLocaleDateString()}
+                                </span>
 
-                          {/* Event Title */}
-                          <h3 className="text-base font-bold text-white group-hover:text-zinc-100 transition-colors line-clamp-1">
-                            {evt.name}
-                          </h3>
+                                {/* 3-Dots Menu Button */}
+                                <div className="relative">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenMenuEventId(openMenuEventId === evt.id ? null : evt.id);
+                                    }}
+                                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-zinc-400 hover:text-white hover:bg-white/[0.1] hover:border-white/20 transition-all"
+                                    title="Opciones del evento"
+                                  >
+                                    <MoreVertical className="h-4 w-4" />
+                                  </button>
 
-                          {evt.description && (
-                            <p className="mt-1.5 text-xs text-zinc-400 line-clamp-2">
-                              {evt.description}
-                            </p>
-                          )}
+                                  {/* Dropdown Menu */}
+                                  {openMenuEventId === evt.id && (
+                                    <div
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="absolute right-0 top-full mt-1.5 z-30 w-52 rounded-xl border border-white/15 bg-zinc-950 p-1.5 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150"
+                                    >
+                                      <div className="px-2.5 py-1.5 text-[10px] font-mono text-zinc-500 uppercase tracking-wider border-b border-white/[0.06] mb-1">
+                                        Gestión de Evento
+                                      </div>
 
-                          {evt.location && (
-                            <div className="mt-3 flex items-center gap-1.5 text-xs text-zinc-400">
-                              <MapPin className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
-                              <span className="truncate">{evt.location}</span>
+                                      {/* Edit action */}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditModal(evt)}
+                                        className="w-full flex items-center gap-2 px-2.5 py-2 text-xs text-zinc-200 hover:text-white hover:bg-white/10 rounded-lg transition-colors text-left font-medium"
+                                      >
+                                        <Pencil className="h-3.5 w-3.5 text-zinc-400" />
+                                        <span>Editar evento</span>
+                                      </button>
+
+                                      {/* Quick status transitions */}
+                                      {evt.status !== "draft" && isEventOwner && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => handleQuickChangeStatus(evt, "draft", e)}
+                                          className="w-full flex items-center gap-2 px-2.5 py-2 text-xs text-amber-300 hover:text-amber-200 hover:bg-amber-500/10 rounded-lg transition-colors text-left"
+                                        >
+                                          <FileEdit className="h-3.5 w-3.5 text-amber-400" />
+                                          <span>Pasar a Borrador</span>
+                                        </button>
+                                      )}
+
+                                      {evt.status !== "open" && isEventOwner && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => handleQuickChangeStatus(evt, "open", e)}
+                                          className="w-full flex items-center gap-2 px-2.5 py-2 text-xs text-emerald-300 hover:text-emerald-200 hover:bg-emerald-500/10 rounded-lg transition-colors text-left"
+                                        >
+                                          <PlayCircle className="h-3.5 w-3.5 text-emerald-400" />
+                                          <span>Publicar / Abrir</span>
+                                        </button>
+                                      )}
+
+                                      {/* Archive / Unarchive toggle */}
+                                      {isEventOwner && (
+                                        evt.archived_at ? (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => handleToggleArchiveEvent(evt, e)}
+                                            className="w-full flex items-center gap-2 px-2.5 py-2 text-xs text-indigo-300 hover:text-indigo-200 hover:bg-indigo-500/10 rounded-lg transition-colors text-left"
+                                          >
+                                            <ArchiveRestore className="h-3.5 w-3.5 text-indigo-400" />
+                                            <span>Desarchivar evento</span>
+                                          </button>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => handleToggleArchiveEvent(evt, e)}
+                                            className="w-full flex items-center gap-2 px-2.5 py-2 text-xs text-purple-300 hover:text-purple-200 hover:bg-purple-500/10 rounded-lg transition-colors text-left"
+                                          >
+                                            <Archive className="h-3.5 w-3.5 text-purple-400" />
+                                            <span>Pasar a Archivado</span>
+                                          </button>
+                                        )
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
                             </div>
-                          )}
-                        </div>
 
-                        {/* Event Stats Footer */}
-                        <div className="mt-6 pt-4 border-t border-white/[0.06] flex items-center justify-between text-xs">
-                          <div className="flex items-center gap-1.5 text-zinc-400">
-                            <Users className="h-3.5 w-3.5 text-zinc-500" />
-                            <span>{eventStats.total} inscritos</span>
+                            {/* Event Title */}
+                            <h3 className="text-base font-bold text-white group-hover:text-zinc-100 transition-colors line-clamp-1">
+                              {evt.name}
+                            </h3>
+
+                            {evt.description && (
+                              <p className="mt-1.5 text-xs text-zinc-400 line-clamp-2">
+                                {evt.description}
+                              </p>
+                            )}
+
+                            {evt.location && (
+                              <div className="mt-3 flex items-center gap-1.5 text-xs text-zinc-400">
+                                <MapPin className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
+                                <span className="truncate">{evt.location}</span>
+                              </div>
+                            )}
                           </div>
 
-                          <div className="flex items-center gap-1 text-white font-medium group-hover:translate-x-0.5 transition-transform">
-                            <span>Gestionar</span>
-                            <ChevronRight className="h-3.5 w-3.5 text-zinc-400" />
+                          {/* Event Stats Footer */}
+                          <div className="mt-6 pt-4 border-t border-white/[0.06] flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-1.5 text-zinc-400">
+                              <Users className="h-3.5 w-3.5 text-zinc-500" />
+                              <span>{eventStats.total} inscritos</span>
+                            </div>
+
+                            <div className="flex items-center gap-1 text-white font-medium group-hover:translate-x-0.5 transition-transform">
+                              <span>Gestionar</span>
+                              <ChevronRight className="h-3.5 w-3.5 text-zinc-400" />
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -545,10 +977,18 @@ function DashboardContent() {
                     <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
                       {selectedEvent.name}
                     </h1>
+                    {selectedEvent.archived_at && (
+                      <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-mono font-medium bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                        <Archive className="h-3 w-3" />
+                        ARCHIVADO
+                      </span>
+                    )}
                     <span
                       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-mono font-medium ${
                         selectedEvent.status === "open"
                           ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                          : selectedEvent.status === "draft"
+                          ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
                           : "bg-zinc-800 text-zinc-400 border border-zinc-700"
                       }`}
                     >
@@ -586,6 +1026,17 @@ function DashboardContent() {
 
                 {/* Quick Action Buttons */}
                 <div className="flex flex-wrap items-center gap-2">
+                  {isOwner && (
+                    <button
+                      onClick={() => handleOpenEditModal(selectedEvent)}
+                      className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-3.5 py-2 text-xs font-medium text-zinc-200 hover:bg-white/[0.08] hover:text-white transition-colors"
+                      title="Editar evento"
+                    >
+                      <Pencil className="h-3.5 w-3.5 text-zinc-400" />
+                      <span>Editar Evento</span>
+                    </button>
+                  )}
+
                   <button
                     onClick={handleExportAttendance}
                     className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-3.5 py-2 text-xs font-medium text-zinc-200 hover:bg-white/[0.08] hover:text-white transition-colors"
@@ -1098,6 +1549,182 @@ function DashboardContent() {
                     className="rounded-lg bg-white px-5 py-2 font-semibold text-black hover:bg-zinc-200 transition-colors"
                   >
                     Crear Evento
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* MODAL: EDIT EVENT                                                         */}
+        {/* ========================================================================= */}
+        {editingEvent && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="w-full max-w-lg rounded-2xl border border-white/15 bg-zinc-950 p-6 sm:p-7 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-white/[0.08] pb-4 mb-5">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white">
+                    <Pencil className="h-4 w-4 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white">Editar Evento</h3>
+                    <p className="text-[11px] font-mono text-zinc-400 truncate max-w-[280px]">
+                      {editingEvent.name}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingEvent(null)}
+                  className="text-zinc-500 hover:text-white text-xs font-mono"
+                >
+                  ✕ Cerrar
+                </button>
+              </div>
+
+              {editFormError && (
+                <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-950/30 p-2.5 text-xs text-red-300">
+                  <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
+                  <span>{editFormError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSaveEditEvent} className="space-y-4 text-xs">
+                <div>
+                  <label className="block text-zinc-300 font-medium mb-1">
+                    Nombre del Evento *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder="Ej. Conferencia de Tecnología 2026"
+                    className="w-full rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-white placeholder-zinc-500 focus:border-white focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-zinc-300 font-medium mb-1">
+                    Descripción
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    placeholder="Breve detalle del alcance o agenda del evento..."
+                    className="w-full rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-white placeholder-zinc-500 focus:border-white focus:outline-none resize-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-zinc-300 font-medium mb-1">
+                    Ubicación o Sala
+                  </label>
+                  <input
+                    type="text"
+                    value={editLocation}
+                    onChange={(e) => setEditLocation(e.target.value)}
+                    placeholder="Ej. Auditorio Principal, Piso 3"
+                    className="w-full rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-white placeholder-zinc-500 focus:border-white focus:outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1">
+                      Fecha y Hora de Inicio *
+                    </label>
+                    <input
+                      type="datetime-local"
+                      required
+                      value={editStartsAt}
+                      onChange={(e) => setEditStartsAt(e.target.value)}
+                      style={{ colorScheme: 'dark' }}
+                      className="w-full rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-white focus:border-white focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-zinc-300 font-medium mb-1">
+                      Fecha y Hora de Fin *
+                    </label>
+                    <input
+                      type="datetime-local"
+                      required
+                      value={editEndsAt}
+                      onChange={(e) => setEditEndsAt(e.target.value)}
+                      style={{ colorScheme: 'dark' }}
+                      className="w-full rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-white focus:border-white focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-zinc-300 font-medium mb-1">
+                    Estado del Evento
+                  </label>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value as "open" | "draft" | "closed")}
+                    className="w-full rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-white focus:border-white focus:outline-none"
+                  >
+                    <option value="open">Abierto (Listo para escaneo y registro)</option>
+                    <option value="draft">Borrador (Configuración interna)</option>
+                    <option value="closed">Cerrado (Finalizado, solo lectura)</option>
+                  </select>
+                </div>
+
+                {/* Archivar Evento Toggle */}
+                <div className="rounded-xl border border-white/10 bg-zinc-900/60 p-3.5 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-lg border ${
+                      editIsArchived
+                        ? "bg-purple-500/15 border-purple-500/30 text-purple-400"
+                        : "bg-white/5 border-white/10 text-zinc-400"
+                    }`}>
+                      <Archive className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-white">Archivar este evento</p>
+                      <p className="text-[11px] text-zinc-400">
+                        Mueve el evento a la pestaña de Archivados. Los eventos archivados se conservan como histórico y no aceptan escaneos en puerta.
+                      </p>
+                    </div>
+                  </div>
+
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={editIsArchived}
+                      onChange={(e) => setEditIsArchived(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                  </label>
+                </div>
+
+                <div className="mt-6 flex items-center justify-end gap-3 pt-3 border-t border-white/[0.08]">
+                  <button
+                    type="button"
+                    onClick={() => setEditingEvent(null)}
+                    className="rounded-lg px-4 py-2 text-zinc-400 hover:text-white transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isUpdatingEvent}
+                    className="rounded-lg bg-white px-5 py-2 font-semibold text-black hover:bg-zinc-200 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {isUpdatingEvent ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <span>Guardando...</span>
+                      </>
+                    ) : (
+                      <span>Guardar Cambios</span>
+                    )}
                   </button>
                 </div>
               </form>
