@@ -27,7 +27,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-black text-[#ededed] font-sans antialiased relative selection:bg-white selection:text-black">
       {/* Vercel subtle grid and gentle spotlight background */}
       <div className="absolute inset-0 vercel-grid pointer-events-none opacity-40" />
-      <div className="absolute top-0 inset-x-0 h-[560px] vercel-spotlight pointer-events-none" />
+      <div className="absolute top-0 inset-x-0 h-[560px] vercel-spotlight pointer-events-no ne" />
 
       {/* Navigation Header */}
       <header className="sticky top-0 z-50 w-full border-b border-white/[0.08] bg-black/80 backdrop-blur-md">

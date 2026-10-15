@@ -271,13 +271,9 @@ export function QRScanner({
         video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
+      // Set active first — the video element is always in the DOM,
+      // the useEffect below handles binding the stream to it.
       setCameraActive(true);
-      // Automatically start scanning once the camera feed is ready
-      startScanLoop();
     } catch (err) {
       console.error("Camera access error:", err);
       setCameraError(
@@ -287,11 +283,32 @@ export function QRScanner({
     }
   };
 
+  // Bind stream → <video> whenever cameraActive flips to true
+  useEffect(() => {
+    if (cameraActive && streamRef.current && videoRef.current) {
+      const video = videoRef.current;
+      video.srcObject = streamRef.current;
+      video
+        .play()
+        .then(() => {
+          startScanLoop();
+        })
+        .catch((err) => {
+          console.error("Video play() failed:", err);
+          setCameraError("No se pudo reproducir el video de la cámara.");
+          setCameraActive(false);
+        });
+    }
+  }, [cameraActive, startScanLoop]);
+
   const stopCamera = useCallback(() => {
     stopScanLoop();
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
     setCameraActive(false);
   }, [stopScanLoop]);
@@ -299,12 +316,14 @@ export function QRScanner({
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      stopCamera();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+      }
       if (audioCtxRef.current) {
         audioCtxRef.current.close().catch(() => {});
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Available registrations for quick-test buttons
@@ -409,18 +428,22 @@ export function QRScanner({
         {/* Left Column: Camera Viewer + Manual Input */}
         <div className="space-y-4 lg:col-span-7">
           {/* Camera Container */}
-          <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-white/10 bg-black flex flex-col items-center justify-center">
-            {cameraActive ? (
-              <div className="relative h-full w-full">
-                <video
-                  ref={videoRef}
-                  className="h-full w-full object-cover"
-                  playsInline
-                  muted
-                  autoPlay
-                />
+          <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-white/10 bg-black">
+            {/* Video element is ALWAYS in the DOM so the ref is never null */}
+            <video
+              ref={videoRef}
+              className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${
+                cameraActive ? "opacity-100" : "opacity-0 pointer-events-none"
+              }`}
+              playsInline
+              muted
+              autoPlay
+            />
+
+            {cameraActive && (
+              <>
                 {/* Focus crosshair overlay */}
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
                   <div className="h-48 w-48 rounded-xl border border-white/30 relative flex items-center justify-center">
                     {/* Corners */}
                     <div className="absolute -top-1 -left-1 h-4 w-4 border-t-2 border-l-2 border-white" />
@@ -435,7 +458,7 @@ export function QRScanner({
                 {/* Last scan result flash overlay */}
                 {lastScanResult && (
                   <div
-                    className={`absolute inset-0 pointer-events-none transition-opacity duration-500 ${
+                    className={`absolute inset-0 pointer-events-none z-10 transition-opacity duration-500 ${
                       lastScanResult.result === "accepted"
                         ? "bg-emerald-500/10"
                         : lastScanResult.result === "already_attended"
@@ -445,9 +468,24 @@ export function QRScanner({
                     style={{ animation: "flash-overlay 1s ease-out forwards" }}
                   />
                 )}
-              </div>
-            ) : (
-              <div className="p-6 text-center">
+
+                {/* Stop camera button */}
+                <div className="absolute bottom-3 right-3 z-20">
+                  <button
+                    type="button"
+                    onClick={stopCamera}
+                    className="flex items-center gap-1.5 rounded-md bg-zinc-900/90 border border-white/10 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 transition-colors"
+                  >
+                    <CameraOff className="h-3.5 w-3.5" />
+                    <span>Apagar</span>
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Idle state placeholder — shown when camera is off */}
+            {!cameraActive && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10">
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-white/[0.04] border border-white/10 mb-3">
                   <Camera className="h-5 w-5 text-zinc-400" />
                 </div>
@@ -468,19 +506,6 @@ export function QRScanner({
                 >
                   <Camera className="h-3.5 w-3.5" />
                   <span>Encender Cámara</span>
-                </button>
-              </div>
-            )}
-
-            {cameraActive && (
-              <div className="absolute bottom-3 right-3">
-                <button
-                  type="button"
-                  onClick={stopCamera}
-                  className="flex items-center gap-1.5 rounded-md bg-zinc-900/90 border border-white/10 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 transition-colors"
-                >
-                  <CameraOff className="h-3.5 w-3.5" />
-                  <span>Apagar</span>
                 </button>
               </div>
             )}
