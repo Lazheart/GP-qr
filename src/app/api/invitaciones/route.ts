@@ -38,10 +38,10 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Consultar invitaciones
-    const { data: invitations, error: invErr } = await supabase
+    // Consultar invitaciones con su token de aceptación
+    const { data: rawInvitations, error: invErr } = await supabase
       .from("event_member_invitations")
-      .select("id, invited_email, status, expires_at, created_at, accepted_at")
+      .select("id, event_id, invited_email, invitation_token, status, expires_at, created_at, accepted_at")
       .eq("event_id", eventId)
       .order("created_at", { ascending: false });
 
@@ -59,9 +59,33 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    // Resolver el origin para generar URLs de invitación directas
+    const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
+    const proto = req.headers.get("x-forwarded-proto") || (host?.includes("localhost") ? "http" : "https");
+    const origin = host ? `${proto}://${host}` : req.nextUrl.origin;
+
+    // Garantizar que cada invitación tenga un invitation_token válido en BD y en la respuesta
+    const invitations = await Promise.all(
+      (rawInvitations || []).map(async (inv) => {
+        let token = inv.invitation_token;
+        if (!token) {
+          token = crypto.randomUUID();
+          await supabase
+            .from("event_member_invitations")
+            .update({ invitation_token: token })
+            .eq("id", inv.id);
+        }
+        return {
+          ...inv,
+          invitation_token: token,
+          invitation_url: `${origin}/invitaciones/${token}`,
+        };
+      })
+    );
+
     return NextResponse.json({
       success: true,
-      invitations: invitations || [],
+      invitations,
       members: members || [],
     });
   } catch (err) {
@@ -139,6 +163,15 @@ export async function POST(req: NextRequest) {
     let invitationToken = existingPending?.invitation_token;
     let expiresAt = existingPending?.expires_at;
 
+    if (existingPending && !invitationToken) {
+      // Reparar token faltante si existía sin token
+      invitationToken = crypto.randomUUID();
+      await supabase
+        .from("event_member_invitations")
+        .update({ invitation_token: invitationToken })
+        .eq("id", existingPending.id);
+    }
+
     if (!existingPending) {
       // Crear nueva invitación
       const newToken = crypto.randomUUID();
@@ -169,7 +202,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Construir URL pública HTTPS para aceptar
-    const origin = req.nextUrl.origin;
+    const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
+    const proto = req.headers.get("x-forwarded-proto") || (host?.includes("localhost") ? "http" : "https");
+    const origin = host ? `${proto}://${host}` : req.nextUrl.origin;
     const acceptUrl = `${origin}/invitaciones/${invitationToken}`;
 
     // Enviar correo electrónico
@@ -184,6 +219,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       message: `Invitación enviada a ${cleanEmail}.`,
+      invitation_token: invitationToken,
       invitation_url: acceptUrl,
       email_sent: emailResult.success,
     });

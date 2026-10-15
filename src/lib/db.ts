@@ -87,6 +87,7 @@ export interface EventMemberInvitationItem {
   expires_at: string;
   created_at: string;
   accepted_at?: string | null;
+  invitation_url?: string;
 }
 
 export interface ScanResultResponse {
@@ -345,7 +346,7 @@ export async function fetchEventTeam(
 export async function inviteValidatorToEvent(
   eventId: string,
   email: string
-): Promise<{ success: boolean; message?: string; error?: string; invitation_url?: string }> {
+): Promise<{ success: boolean; message?: string; error?: string; invitation_url?: string; invitation_token?: string }> {
   try {
     const res = await fetch("/api/invitaciones", {
       method: "POST",
@@ -356,7 +357,12 @@ export async function inviteValidatorToEvent(
     if (!res.ok) {
       return { success: false, error: data.error || "Error al invitar validador" };
     }
-    return { success: true, message: data.message, invitation_url: data.invitation_url };
+    return {
+      success: true,
+      message: data.message,
+      invitation_url: data.invitation_url,
+      invitation_token: data.invitation_token,
+    };
   } catch (err) {
     return { success: false, error: String(err) };
   }

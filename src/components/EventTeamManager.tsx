@@ -42,7 +42,12 @@ export function EventTeamManager({
   const [isInviting, setIsInviting] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [createdInvitation, setCreatedInvitation] = useState<{
+    email: string;
+    url: string;
+  } | null>(null);
+  const [copiedCreated, setCopiedCreated] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -63,19 +68,27 @@ export function EventTeamManager({
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!emailInput.trim()) return;
+    const cleanEmail = emailInput.trim();
+    if (!cleanEmail) return;
 
     setIsInviting(true);
     setActionMessage(null);
     setActionError(null);
+    setCreatedInvitation(null);
 
-    const res = await inviteValidatorToEvent(eventId, emailInput.trim());
+    const res = await inviteValidatorToEvent(eventId, cleanEmail);
     setIsInviting(false);
 
     if (!res.success) {
       setActionError(res.error || "No se pudo enviar la invitación.");
     } else {
-      setActionMessage(res.message || "Invitación enviada con éxito.");
+      setActionMessage(res.message || "Invitación generada con éxito.");
+      if (res.invitation_url) {
+        setCreatedInvitation({
+          email: cleanEmail,
+          url: res.invitation_url,
+        });
+      }
       setEmailInput("");
       loadData();
     }
@@ -117,12 +130,43 @@ export function EventTeamManager({
     }
   };
 
-  const handleCopyLink = (token: string) => {
+  const handleCopyLink = (inv: EventMemberInvitationItem) => {
+    const token = inv.invitation_token;
+    if (!token) {
+      setActionError("Esta invitación aún no tiene un token generado. Actualiza la lista.");
+      return;
+    }
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const url = `${origin}/invitaciones/${token}`;
-    navigator.clipboard.writeText(url);
-    setCopiedToken(token);
-    setTimeout(() => setCopiedToken(null), 2500);
+    const url = inv.invitation_url || `${origin}/invitaciones/${token}`;
+
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(url);
+    } else {
+      const textArea = document.createElement("textarea");
+      textArea.value = url;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textArea);
+    }
+
+    setCopiedId(inv.id);
+    setTimeout(() => setCopiedId(null), 2500);
+  };
+
+  const handleCopyCreatedUrl = (url: string) => {
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(url);
+    } else {
+      const textArea = document.createElement("textarea");
+      textArea.value = url;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textArea);
+    }
+    setCopiedCreated(true);
+    setTimeout(() => setCopiedCreated(false), 2500);
   };
 
   if (!isOwner) {
@@ -172,6 +216,62 @@ export function EventTeamManager({
           <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-950/30 p-3 text-xs text-emerald-300">
             <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
             <span>{actionMessage}</span>
+          </div>
+        )}
+
+        {/* Tarjeta de enlace directo recién generado */}
+        {createdInvitation && (
+          <div className="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-4">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <span className="text-xs font-semibold text-emerald-300 flex items-center gap-1.5">
+                <Check className="h-4 w-4 text-emerald-400" />
+                Enlace de invitación generado para {createdInvitation.email}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCreatedInvitation(null)}
+                className="text-[11px] text-zinc-400 hover:text-white"
+              >
+                Cerrar
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                readOnly
+                value={createdInvitation.url}
+                className="flex-1 rounded-lg border border-white/10 bg-black/80 px-3 py-1.5 text-xs font-mono text-zinc-300 select-all focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => handleCopyCreatedUrl(createdInvitation.url)}
+                className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-black hover:bg-zinc-200 transition-colors"
+              >
+                {copiedCreated ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-emerald-600" />
+                    <span>Copiado</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5" />
+                    <span>Copiar</span>
+                  </>
+                )}
+              </button>
+              <a
+                href={createdInvitation.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.05] p-2 text-zinc-300 hover:text-white hover:bg-white/[0.1] transition-colors"
+                title="Abrir enlace"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </div>
+            <p className="mt-1.5 text-[10px] text-zinc-400 font-mono">
+              Puedes copiar y compartir este enlace por WhatsApp, Slack u otro canal directamente si el destinatario no recibe el correo.
+            </p>
           </div>
         )}
 
@@ -298,11 +398,11 @@ export function EventTeamManager({
                     {/* Copiar enlace */}
                     <button
                       type="button"
-                      onClick={() => handleCopyLink(inv.invitation_token)}
-                      className="flex items-center gap-1 rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-zinc-300 hover:text-white transition-colors"
+                      onClick={() => handleCopyLink(inv)}
+                      className="flex items-center gap-1 rounded border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-zinc-300 hover:text-white transition-colors"
                       title="Copiar enlace directo de aceptación"
                     >
-                      {copiedToken === inv.invitation_token ? (
+                      {copiedId === inv.id ? (
                         <>
                           <Check className="h-3 w-3 text-emerald-400" />
                           <span className="text-emerald-400 font-semibold">Copiado</span>
@@ -314,6 +414,19 @@ export function EventTeamManager({
                         </>
                       )}
                     </button>
+
+                    {/* Abrir enlace directo */}
+                    {inv.invitation_token && (
+                      <a
+                        href={inv.invitation_url || `/invitaciones/${inv.invitation_token}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 rounded border border-white/10 bg-white/[0.04] p-1.5 text-zinc-400 hover:text-white transition-colors"
+                        title="Abrir página de aceptación"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
 
                     {/* Revocar */}
                     <button
