@@ -833,7 +833,7 @@ function DashboardContent() {
               <div className="flex items-center justify-between border-b border-white/[0.08] pb-4 mb-5">
                 <div className="flex items-center gap-2">
                   <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white">
-                    <Calendar className="h-4 w-4" />
+                    <Calendar className="h-4 w-4 text-white" />
                   </div>
                   <h3 className="text-lg font-bold text-white">Crear Nuevo Evento</h3>
                 </div>
@@ -903,6 +903,7 @@ function DashboardContent() {
                       required
                       value={newEventStartsAt}
                       onChange={(e) => setNewEventStartsAt(e.target.value)}
+                      style={{ colorScheme: 'dark' }}
                       className="w-full rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-white focus:border-white focus:outline-none"
                     />
                   </div>
@@ -915,6 +916,7 @@ function DashboardContent() {
                       required
                       value={newEventEndsAt}
                       onChange={(e) => setNewEventEndsAt(e.target.value)}
+                      style={{ colorScheme: 'dark' }}
                       className="w-full rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-white focus:border-white focus:outline-none"
                     />
                   </div>
