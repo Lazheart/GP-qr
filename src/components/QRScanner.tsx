@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import jsQR from "jsqr";
 import {
   Camera,
   CameraOff,
@@ -13,14 +14,15 @@ import {
   VolumeX,
   History,
   QrCode,
+  Loader2,
 } from "lucide-react";
 import {
   EventItem,
-  processScanToken,
   ScanResultResponse,
   getStoredLogs,
   AttendanceLogItem,
   getStoredRegistrations,
+  isValidUUID,
 } from "@/lib/db";
 
 interface QRScannerProps {
@@ -29,6 +31,11 @@ interface QRScannerProps {
   onScanCompleted?: () => void;
 }
 
+/** Minimum milliseconds between two accepted scans (prevents rapid duplicates) */
+const SCAN_COOLDOWN_MS = 2_000;
+/** How often (ms) we grab a frame from the camera to attempt QR decode */
+const SCAN_INTERVAL_MS = 250;
+
 export function QRScanner({
   events,
   currentEventId,
@@ -36,14 +43,20 @@ export function QRScanner({
 }: QRScannerProps) {
   const [manualToken, setManualToken] = useState("");
   const [cameraActive, setCameraActive] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [lastScanResult, setLastScanResult] = useState<ScanResultResponse | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [recentLogs, setRecentLogs] = useState<AttendanceLogItem[]>([]);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [processingManual, setProcessingManual] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastScannedTokenRef = useRef<string>("");
+  const lastScanTimeRef = useRef<number>(0);
 
   const selectedEvent = events.find((e) => e.id === currentEventId) || events[0];
 
@@ -58,85 +71,213 @@ export function QRScanner({
     refreshLogs();
   }, [refreshLogs]);
 
-  // Reproducir sonido sutil de feedback
-  const playBeep = (type: "success" | "warning" | "error") => {
-    if (!soundEnabled) return;
-    try {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new (window.AudioContext ||
-          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+  // ─── Audio feedback ───────────────────────────────────────────────
+  const playBeep = useCallback(
+    (type: "success" | "warning" | "error") => {
+      if (!soundEnabled) return;
+      try {
+        if (!audioCtxRef.current) {
+          audioCtxRef.current = new (window.AudioContext ||
+            (window as unknown as { webkitAudioContext: typeof AudioContext })
+              .webkitAudioContext)();
+        }
+        const ctx = audioCtxRef.current;
+        if (ctx.state === "suspended") {
+          ctx.resume();
+        }
+
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        if (type === "success") {
+          osc.frequency.setValueAtTime(880, ctx.currentTime);
+          gain.gain.setValueAtTime(0.08, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.18);
+        } else if (type === "warning") {
+          osc.frequency.setValueAtTime(440, ctx.currentTime);
+          gain.gain.setValueAtTime(0.08, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.25);
+        } else {
+          osc.frequency.setValueAtTime(220, ctx.currentTime);
+          gain.gain.setValueAtTime(0.1, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.35);
+        }
+      } catch (e) {
+        console.warn("Audio Context error:", e);
       }
-      const ctx = audioCtxRef.current;
-      if (ctx.state === "suspended") {
-        ctx.resume();
-      }
+    },
+    [soundEnabled]
+  );
 
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
+  // ─── Core scan execution (Supabase + local fallback) ──────────────
+  const handleExecuteScan = useCallback(
+    async (rawToken: string) => {
+      if (!rawToken.trim() || !selectedEvent) return;
 
-      if (type === "success") {
-        osc.frequency.setValueAtTime(880, ctx.currentTime); // A5 note
-        gain.gain.setValueAtTime(0.08, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.18);
-      } else if (type === "warning") {
-        osc.frequency.setValueAtTime(440, ctx.currentTime);
-        gain.gain.setValueAtTime(0.08, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.25);
-      } else {
-        osc.frequency.setValueAtTime(220, ctx.currentTime);
-        gain.gain.setValueAtTime(0.1, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.35);
-      }
-    } catch (e) {
-      console.warn("Audio Context error:", e);
-    }
-  };
+      const token = rawToken.trim();
 
-  // Manejar el resultado de un escaneo
-  const handleExecuteScan = async (rawToken: string) => {
-    if (!rawToken.trim() || !selectedEvent) return;
+      try {
+        // 1️⃣ Try Supabase RPC first (works for UUID qr_tokens)
+        if (isValidUUID(token)) {
+          const { scanEventQRWithSupabase } = await import("@/lib/db");
+          const res = await scanEventQRWithSupabase(selectedEvent.id, token);
+          setLastScanResult(res);
 
-    try {
-      const { scanEventQRWithSupabase } = await import("@/lib/db");
-      const res = await scanEventQRWithSupabase(selectedEvent.id, rawToken);
-      setLastScanResult(res);
+          if (res.result === "accepted") playBeep("success");
+          else if (res.result === "already_attended") playBeep("warning");
+          else playBeep("error");
 
-      if (res.result === "accepted") {
-        playBeep("success");
-      } else if (res.result === "already_attended") {
-        playBeep("warning");
-      } else {
+          refreshLogs();
+          if (onScanCompleted) onScanCompleted();
+          return;
+        }
+
+        // 2️⃣ Not a UUID — try matching by document_number via Supabase
+        const { fetchRegistrationsFromSupabase } = await import("@/lib/db");
+        const { data: regs } = await fetchRegistrationsFromSupabase(selectedEvent.id);
+
+        if (regs && regs.length > 0) {
+          const match = regs.find(
+            (r) =>
+              r.document_number.toLowerCase() === token.toLowerCase() ||
+              r.qr_token.toLowerCase() === token.toLowerCase()
+          );
+
+          if (match) {
+            // Found by DNI → scan using the UUID token
+            const { scanEventQRWithSupabase } = await import("@/lib/db");
+            const res = await scanEventQRWithSupabase(selectedEvent.id, match.qr_token);
+            setLastScanResult(res);
+
+            if (res.result === "accepted") playBeep("success");
+            else if (res.result === "already_attended") playBeep("warning");
+            else playBeep("error");
+
+            refreshLogs();
+            if (onScanCompleted) onScanCompleted();
+            return;
+          }
+        }
+
+        // 3️⃣ Local fallback — tries local stored registrations
+        const { processScanToken } = await import("@/lib/db");
+        const localRes = processScanToken(selectedEvent.id, token);
+        setLastScanResult(localRes);
+
+        if (localRes.result === "accepted") playBeep("success");
+        else if (localRes.result === "already_attended") playBeep("warning");
+        else playBeep("error");
+
+        refreshLogs();
+        if (onScanCompleted) onScanCompleted();
+      } catch (err) {
+        console.error("Error executing scan:", err);
+        setLastScanResult({
+          result: "not_authorized",
+          message: "Error de conexión al intentar validar el código.",
+          scannedAt: new Date().toISOString(),
+        });
         playBeep("error");
       }
+    },
+    [selectedEvent, playBeep, refreshLogs, onScanCompleted]
+  );
 
-      refreshLogs();
-      if (onScanCompleted) onScanCompleted();
-    } catch (err) {
-      console.error("Error executing scan:", err);
+  // ─── Camera QR decode loop ────────────────────────────────────────
+  const startScanLoop = useCallback(() => {
+    if (scanIntervalRef.current) return;
+
+    setScanning(true);
+
+    scanIntervalRef.current = setInterval(() => {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (!video || !canvas || video.readyState < video.HAVE_ENOUGH_DATA) return;
+
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return;
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const qrResult = jsQR(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: "dontInvert",
+      });
+
+      if (qrResult && qrResult.data) {
+        const now = Date.now();
+        const decoded = qrResult.data.trim();
+
+        // Cooldown: don't re-scan the same token within SCAN_COOLDOWN_MS
+        if (
+          decoded === lastScannedTokenRef.current &&
+          now - lastScanTimeRef.current < SCAN_COOLDOWN_MS
+        ) {
+          return;
+        }
+
+        lastScannedTokenRef.current = decoded;
+        lastScanTimeRef.current = now;
+
+        // Extract token from URL-style QR codes (e.g. https://…/ticket?token=UUID)
+        let tokenToScan = decoded;
+        try {
+          const url = new URL(decoded);
+          const urlToken = url.searchParams.get("token") || url.searchParams.get("t");
+          if (urlToken) {
+            tokenToScan = urlToken;
+          } else {
+            // Maybe the last path segment is the token
+            const segments = url.pathname.split("/").filter(Boolean);
+            if (segments.length > 0) {
+              const lastSeg = segments[segments.length - 1];
+              if (isValidUUID(lastSeg)) {
+                tokenToScan = lastSeg;
+              }
+            }
+          }
+        } catch {
+          // Not a URL — use the raw decoded value
+        }
+
+        handleExecuteScan(tokenToScan);
+      }
+    }, SCAN_INTERVAL_MS);
+  }, [handleExecuteScan]);
+
+  const stopScanLoop = useCallback(() => {
+    if (scanIntervalRef.current) {
+      clearInterval(scanIntervalRef.current);
+      scanIntervalRef.current = null;
     }
-  };
+    setScanning(false);
+  }, []);
 
-  // Iniciar cámara web
+  // ─── Camera lifecycle ─────────────────────────────────────────────
   const startCamera = async () => {
     setCameraError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1280 } },
+        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
       });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
+        await videoRef.current.play();
       }
       setCameraActive(true);
+      // Automatically start scanning once the camera feed is ready
+      startScanLoop();
     } catch (err) {
       console.error("Camera access error:", err);
       setCameraError(
@@ -146,15 +287,16 @@ export function QRScanner({
     }
   };
 
-  // Detener cámara
-  const stopCamera = () => {
+  const stopCamera = useCallback(() => {
+    stopScanLoop();
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
     setCameraActive(false);
-  };
+  }, [stopScanLoop]);
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopCamera();
@@ -162,22 +304,68 @@ export function QRScanner({
         audioCtxRef.current.close().catch(() => {});
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Simulación de escaneo rápido con asistentes disponibles
+  // Available registrations for quick-test buttons
   const currentRegistrations = selectedEvent
     ? getStoredRegistrations(selectedEvent.id)
     : [];
 
+  // Compute result display styling
+  const getResultStyle = (result: string) => {
+    switch (result) {
+      case "accepted":
+        return "border-emerald-500/30 bg-emerald-950/20 text-emerald-300";
+      case "already_attended":
+        return "border-amber-500/30 bg-amber-950/20 text-amber-300";
+      default:
+        return "border-red-500/30 bg-red-950/20 text-red-300";
+    }
+  };
+
+  const getResultIcon = (result: string) => {
+    switch (result) {
+      case "accepted":
+        return <CheckCircle2 className="h-6 w-6 shrink-0 text-emerald-400" />;
+      case "already_attended":
+        return <AlertTriangle className="h-6 w-6 shrink-0 text-amber-400" />;
+      default:
+        return <XCircle className="h-6 w-6 shrink-0 text-red-400" />;
+    }
+  };
+
+  const getResultLabel = (result: string) => {
+    switch (result) {
+      case "accepted":
+        return "ACCESO PERMITIDO";
+      case "already_attended":
+        return "YA REGISTRADO";
+      case "invalid_qr":
+        return "CÓDIGO NO VÁLIDO";
+      case "event_not_open":
+        return "EVENTO CERRADO";
+      case "cancelled_registration":
+        return "INSCRIPCIÓN CANCELADA";
+      case "not_authorized":
+        return "NO AUTORIZADO";
+      default:
+        return "ERROR";
+    }
+  };
+
   return (
     <div className="w-full rounded-xl border border-white/[0.08] bg-zinc-950/60 p-6 backdrop-blur-sm">
+      {/* Hidden canvas for QR decoding — never rendered visually */}
+      <canvas ref={canvasRef} className="hidden" />
+
       {/* Header */}
       <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
             <span className="flex h-2 w-2 rounded-full bg-emerald-400" />
             <h3 className="text-base font-medium text-white tracking-tight">
-              Terminal de Control de Acceso & Escáner
+              Terminal de Control de Acceso &amp; Escáner
             </h3>
           </div>
           <p className="mt-1 text-xs text-zinc-400">
@@ -187,6 +375,15 @@ export function QRScanner({
         </div>
 
         <div className="flex items-center gap-2">
+          {cameraActive && (
+            <div className="flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-950/20 px-2.5 py-1.5 text-[11px] text-emerald-300 font-mono">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+              </span>
+              Escaneando
+            </div>
+          )}
           <button
             type="button"
             onClick={() => setSoundEnabled(!soundEnabled)}
@@ -209,9 +406,9 @@ export function QRScanner({
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        {/* Columna Izquierda: Visor de Cámara y Entrada Manual */}
+        {/* Left Column: Camera Viewer + Manual Input */}
         <div className="space-y-4 lg:col-span-7">
-          {/* Contenedor de Cámara */}
+          {/* Camera Container */}
           <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-white/10 bg-black flex flex-col items-center justify-center">
             {cameraActive ? (
               <div className="relative h-full w-full">
@@ -220,8 +417,9 @@ export function QRScanner({
                   className="h-full w-full object-cover"
                   playsInline
                   muted
+                  autoPlay
                 />
-                {/* Cuadrante de enfoque minimalista */}
+                {/* Focus crosshair overlay */}
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="h-48 w-48 rounded-xl border border-white/30 relative flex items-center justify-center">
                     {/* Corners */}
@@ -229,10 +427,24 @@ export function QRScanner({
                     <div className="absolute -top-1 -right-1 h-4 w-4 border-t-2 border-r-2 border-white" />
                     <div className="absolute -bottom-1 -left-1 h-4 w-4 border-b-2 border-l-2 border-white" />
                     <div className="absolute -bottom-1 -right-1 h-4 w-4 border-b-2 border-r-2 border-white" />
-                    {/* Subtle scanline animation */}
-                    <div className="absolute inset-x-2 h-0.5 bg-gradient-to-r from-transparent via-white/70 to-transparent animate-pulse" />
+                    {/* Animated scan line */}
+                    <div className="absolute inset-x-2 h-0.5 bg-gradient-to-r from-transparent via-emerald-400/80 to-transparent animate-scan-line" />
                   </div>
                 </div>
+
+                {/* Last scan result flash overlay */}
+                {lastScanResult && (
+                  <div
+                    className={`absolute inset-0 pointer-events-none transition-opacity duration-500 ${
+                      lastScanResult.result === "accepted"
+                        ? "bg-emerald-500/10"
+                        : lastScanResult.result === "already_attended"
+                        ? "bg-amber-500/10"
+                        : "bg-red-500/10"
+                    }`}
+                    style={{ animation: "flash-overlay 1s ease-out forwards" }}
+                  />
+                )}
               </div>
             ) : (
               <div className="p-6 text-center">
@@ -241,7 +453,8 @@ export function QRScanner({
                 </div>
                 <p className="text-xs font-medium text-white">Cámara en espera</p>
                 <p className="mt-1 text-[11px] text-zinc-500 max-w-xs">
-                  Activa la cámara del dispositivo para escanear boletos impresos o pantallas móviles al instante.
+                  Activa la cámara del dispositivo para escanear boletos impresos o
+                  pantallas móviles al instante.
                 </p>
 
                 {cameraError && (
@@ -273,12 +486,15 @@ export function QRScanner({
             )}
           </div>
 
-          {/* Entrada Manual de Token / DNI */}
+          {/* Manual Token / DNI Input */}
           <form
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault();
-              handleExecuteScan(manualToken);
+              if (!manualToken.trim() || processingManual) return;
+              setProcessingManual(true);
+              await handleExecuteScan(manualToken);
               setManualToken("");
+              setProcessingManual(false);
             }}
             className="flex gap-2"
           >
@@ -293,15 +509,19 @@ export function QRScanner({
             </div>
             <button
               type="submit"
-              disabled={!manualToken.trim()}
+              disabled={!manualToken.trim() || processingManual}
               className="flex items-center gap-1.5 rounded-md bg-white px-4 py-2 text-xs font-medium text-black hover:bg-zinc-200 disabled:opacity-40 transition-colors"
             >
-              <Search className="h-3.5 w-3.5" />
+              {processingManual ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Search className="h-3.5 w-3.5" />
+              )}
               <span>Validar</span>
             </button>
           </form>
 
-          {/* Atajos rápidos de prueba con asistentes registrados */}
+          {/* Quick-test shortcuts with registered attendees */}
           {currentRegistrations.length > 0 && (
             <div className="pt-1">
               <p className="text-[10px] font-mono uppercase text-zinc-500 mb-1.5">
@@ -316,7 +536,9 @@ export function QRScanner({
                     className="flex items-center gap-1 rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] font-mono text-zinc-300 hover:bg-white/[0.08] hover:text-white transition-colors"
                   >
                     <QrCode className="h-3 w-3 text-zinc-400" />
-                    <span>{reg.full_name.split(" ")[0]} ({reg.document_number})</span>
+                    <span>
+                      {reg.full_name.split(" ")[0]} ({reg.document_number})
+                    </span>
                   </button>
                 ))}
               </div>
@@ -324,9 +546,9 @@ export function QRScanner({
           )}
         </div>
 
-        {/* Columna Derecha: Tarjeta de Resultado y Auditoría */}
+        {/* Right Column: Result Card + Audit Trail */}
         <div className="space-y-4 lg:col-span-5">
-          {/* Tarjeta de Resultado */}
+          {/* Result Card */}
           <div className="rounded-lg border border-white/10 bg-black/40 p-4">
             <p className="text-[11px] font-mono uppercase text-zinc-500 mb-3">
               Última Validación
@@ -334,34 +556,16 @@ export function QRScanner({
 
             {lastScanResult ? (
               <div
-                className={`rounded-lg border p-4 transition-all ${
-                  lastScanResult.result === "accepted"
-                    ? "border-emerald-500/30 bg-emerald-950/20 text-emerald-300"
-                    : lastScanResult.result === "already_attended"
-                    ? "border-amber-500/30 bg-amber-950/20 text-amber-300"
-                    : "border-red-500/30 bg-red-950/20 text-red-300"
-                }`}
+                className={`rounded-lg border p-4 transition-all ${getResultStyle(
+                  lastScanResult.result
+                )}`}
               >
                 <div className="flex items-start gap-3">
-                  {lastScanResult.result === "accepted" && (
-                    <CheckCircle2 className="h-6 w-6 shrink-0 text-emerald-400" />
-                  )}
-                  {lastScanResult.result === "already_attended" && (
-                    <AlertTriangle className="h-6 w-6 shrink-0 text-amber-400" />
-                  )}
-                  {lastScanResult.result !== "accepted" &&
-                    lastScanResult.result !== "already_attended" && (
-                      <XCircle className="h-6 w-6 shrink-0 text-red-400" />
-                    )}
+                  {getResultIcon(lastScanResult.result)}
 
                   <div className="space-y-1">
                     <p className="text-xs font-semibold">
-                      {lastScanResult.result === "accepted" && "ACCESO PERMITIDO"}
-                      {lastScanResult.result === "already_attended" && "YA REGISTRADO"}
-                      {lastScanResult.result === "invalid_qr" && "CÓDIGO NO VÁLIDO"}
-                      {lastScanResult.result === "event_not_open" && "EVENTO CERRADO"}
-                      {lastScanResult.result === "cancelled_registration" &&
-                        "INSCRIPCIÓN CANCELADA"}
+                      {getResultLabel(lastScanResult.result)}
                     </p>
                     <p className="text-xs opacity-90">{lastScanResult.message}</p>
 
@@ -379,6 +583,18 @@ export function QRScanner({
                         </p>
                       </div>
                     )}
+
+                    {lastScanResult.participant_name &&
+                      !lastScanResult.registration && (
+                        <div className="pt-2 mt-2 border-t border-white/10 text-[11px] font-mono">
+                          <p>
+                            <span className="opacity-60">Participante:</span>{" "}
+                            <span className="font-semibold text-white">
+                              {lastScanResult.participant_name}
+                            </span>
+                          </p>
+                        </div>
+                      )}
                   </div>
                 </div>
               </div>
@@ -393,7 +609,7 @@ export function QRScanner({
             )}
           </div>
 
-          {/* Historial de Auditoría */}
+          {/* Audit Trail */}
           <div className="rounded-lg border border-white/[0.08] bg-black/40 p-4">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-300">
@@ -431,7 +647,9 @@ export function QRScanner({
                           {log.participant_name || "Desconocido"}
                         </p>
                         <p className="text-[10px] font-mono text-zinc-500">
-                          {log.document_number ? `DNI: ${log.document_number}` : log.result}
+                          {log.document_number
+                            ? `DNI: ${log.document_number}`
+                            : log.result}
                         </p>
                       </div>
                     </div>
@@ -450,6 +668,32 @@ export function QRScanner({
           </div>
         </div>
       </div>
+
+      {/* Inline styles for the scan line animation and flash overlay */}
+      <style jsx>{`
+        @keyframes scan-line-move {
+          0%,
+          100% {
+            transform: translateY(-80px);
+            opacity: 0.3;
+          }
+          50% {
+            transform: translateY(80px);
+            opacity: 1;
+          }
+        }
+        .animate-scan-line {
+          animation: scan-line-move 2s ease-in-out infinite;
+        }
+        @keyframes flash-overlay {
+          0% {
+            opacity: 1;
+          }
+          100% {
+            opacity: 0;
+          }
+        }
+      `}</style>
     </div>
   );
 }
