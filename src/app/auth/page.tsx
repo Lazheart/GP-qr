@@ -85,14 +85,6 @@ export default function AuthPage() {
         });
 
         if (error) {
-          // If Supabase credentials in .env.local are test/invalid, provide clear feedback with option
-          if (error.message.toLowerCase().includes("invalid api key") || error.message.toLowerCase().includes("fetch")) {
-            setSuccessMessage("Acceso en modo demostración. Redirigiendo al panel...");
-            setTimeout(() => {
-              router.push("/dashboard");
-            }, 800);
-            return;
-          }
           throw error;
         }
 
@@ -109,13 +101,6 @@ export default function AuthPage() {
         });
 
         if (error) {
-          if (error.message.toLowerCase().includes("invalid api key") || error.message.toLowerCase().includes("fetch")) {
-            setSuccessMessage("Cuenta de demostración creada. Redirigiendo...");
-            setTimeout(() => {
-              router.push("/dashboard");
-            }, 800);
-            return;
-          }
           throw error;
         }
 
@@ -338,16 +323,7 @@ export default function AuthPage() {
               </button>
             </form>
 
-            {/* Quick Demo Access */}
-            <div className="mt-6 pt-5 border-t border-white/[0.08] text-center">
-              <button
-                type="button"
-                onClick={() => router.push("/dashboard")}
-                className="text-xs text-zinc-400 hover:text-white transition-colors font-mono underline underline-offset-4"
-              >
-                Continuar en modo de prueba al Dashboard →
-              </button>
-            </div>
+
           </div>
         </div>
       </main>

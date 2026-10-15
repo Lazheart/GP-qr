@@ -84,7 +84,7 @@ function DashboardContent() {
   const [newEventStatus, setNewEventStatus] = useState<"draft" | "open" | "closed">("open");
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Check auth
+  // Load authenticated user info (middleware already guards access)
   useEffect(() => {
     async function loadUser() {
       try {
@@ -92,11 +92,9 @@ function DashboardContent() {
         const { data } = await supabase.auth.getUser();
         if (data.user) {
           setUserEmail(data.user.email || "Usuario Conectado");
-        } else {
-          setUserEmail("Modo Demostración");
         }
       } catch {
-        setUserEmail("Modo Demostración");
+        // Session will be handled by middleware
       }
     }
     loadUser();
