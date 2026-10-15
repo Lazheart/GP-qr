@@ -104,12 +104,12 @@ function DashboardContent() {
   const loadEventsData = useCallback(async () => {
     // 1. Try Supabase
     const { data, error } = await fetchEventsFromSupabase();
-    if (!error && data && data.length > 0) {
+    if (!error && data) {
       setEvents(data);
       saveEvents(data);
       return data;
     }
-    // 2. Fallback to stored
+    // 2. Fallback to stored (only on network/auth error)
     const local = getStoredEvents();
     setEvents(local);
     return local;
@@ -124,9 +124,10 @@ function DashboardContent() {
     // Try Supabase first
     const { data, error } = await fetchRegistrationsFromSupabase(eventId);
     let list: RegistrationItem[] = [];
-    if (!error && data && data.length > 0) {
+    if (!error && data) {
       list = data;
     } else {
+      // Fallback to stored only on network/auth error
       list = getStoredRegistrations(eventId);
     }
     setRegistrations(list);

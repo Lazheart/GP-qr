@@ -72,84 +72,13 @@ export interface ScanResultResponse {
   participant_name?: string;
 }
 
-// Default seed data with standard UUIDs aligned with PostgreSQL schema
-const DEFAULT_EVENTS: EventItem[] = [
-  {
-    id: "a0000000-0000-4000-8000-000000000001",
-    name: "Tech Summit GPQR 2026",
-    description: "Conferencia Magistral de Innovación, Software y Transformación Digital.",
-    location: "Centro de Convenciones & Streaming Global",
-    starts_at: new Date(Date.now() - 3600000).toISOString(),
-    ends_at: new Date(Date.now() + 86400000 * 2).toISOString(),
-    status: "open",
-    created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
-  },
-  {
-    id: "a0000000-0000-4000-8000-000000000002",
-    name: "Hackathon Nacional de IA & Cloud",
-    description: "Competencia de desarrollo ágil con modelos de lenguaje y automatización.",
-    location: "Campus Tecnológico Central",
-    starts_at: new Date(Date.now() + 86400000 * 7).toISOString(),
-    ends_at: new Date(Date.now() + 86400000 * 8).toISOString(),
-    status: "draft",
-    created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
-  },
-];
+// No demo/seed data — only real Supabase data is displayed
+const DEFAULT_EVENTS: EventItem[] = [];
+const DEFAULT_REGISTRATIONS: RegistrationItem[] = [];
 
-const DEFAULT_REGISTRATIONS: RegistrationItem[] = [
-  {
-    id: "b0000000-0000-4000-8000-000000000001",
-    event_id: "a0000000-0000-4000-8000-000000000001",
-    document_number: "72938401",
-    full_name: "Gabriel Pino",
-    email: "gabriel.pino@example.com",
-    phone: "+51 987 654 321",
-    qr_token: "c0000000-0000-4000-8000-000000000001",
-    status: "registered",
-    checked_in_at: new Date(Date.now() - 1800000).toISOString(),
-    created_at: new Date(Date.now() - 86400000 * 3).toISOString(),
-  },
-  {
-    id: "b0000000-0000-4000-8000-000000000002",
-    event_id: "a0000000-0000-4000-8000-000000000001",
-    document_number: "44892019",
-    full_name: "Valeria Mendoza Cruz",
-    email: "valeria.mendoza@example.com",
-    phone: "+51 991 234 567",
-    qr_token: "c0000000-0000-4000-8000-000000000002",
-    status: "registered",
-    checked_in_at: null,
-    created_at: new Date(Date.now() - 86400000 * 3).toISOString(),
-  },
-  {
-    id: "b0000000-0000-4000-8000-000000000003",
-    event_id: "a0000000-0000-4000-8000-000000000001",
-    document_number: "10982344",
-    full_name: "Carlos Eduardo Silva",
-    email: "carlos.silva@example.com",
-    phone: "+51 912 345 678",
-    qr_token: "c0000000-0000-4000-8000-000000000003",
-    status: "registered",
-    checked_in_at: null,
-    created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
-  },
-  {
-    id: "b0000000-0000-4000-8000-000000000004",
-    event_id: "a0000000-0000-4000-8000-000000000001",
-    document_number: "88231902",
-    full_name: "Elena Lucía Morales",
-    email: "elena.morales@example.com",
-    phone: "+51 934 567 890",
-    qr_token: "c0000000-0000-4000-8000-000000000004",
-    status: "registered",
-    checked_in_at: new Date(Date.now() - 900000).toISOString(),
-    created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
-  },
-];
-
-const STORAGE_KEY_EVENTS = "gpqr_events_data_v2";
-const STORAGE_KEY_REGISTRATIONS = "gpqr_registrations_data_v2";
-const STORAGE_KEY_LOGS = "gpqr_logs_data_v2";
+const STORAGE_KEY_EVENTS = "gpqr_events_data_v3";
+const STORAGE_KEY_REGISTRATIONS = "gpqr_registrations_data_v3";
+const STORAGE_KEY_LOGS = "gpqr_logs_data_v3";
 
 function isBrowser(): boolean {
   return typeof window !== "undefined";
@@ -354,17 +283,14 @@ export async function scanEventQRWithSupabase(
  */
 
 export function getStoredEvents(): EventItem[] {
-  if (!isBrowser()) return DEFAULT_EVENTS;
+  if (!isBrowser()) return [];
   const stored = localStorage.getItem(STORAGE_KEY_EVENTS);
-  if (!stored) {
-    localStorage.setItem(STORAGE_KEY_EVENTS, JSON.stringify(DEFAULT_EVENTS));
-    return DEFAULT_EVENTS;
-  }
+  if (!stored) return [];
   try {
     const parsed = JSON.parse(stored);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_EVENTS;
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
-    return DEFAULT_EVENTS;
+    return [];
   }
 }
 
@@ -375,22 +301,15 @@ export function saveEvents(events: EventItem[]) {
 }
 
 export function getStoredRegistrations(eventId?: string): RegistrationItem[] {
-  if (!isBrowser()) {
-    return eventId
-      ? DEFAULT_REGISTRATIONS.filter((r) => r.event_id === eventId)
-      : DEFAULT_REGISTRATIONS;
-  }
+  if (!isBrowser()) return [];
   const stored = localStorage.getItem(STORAGE_KEY_REGISTRATIONS);
-  let list: RegistrationItem[] = DEFAULT_REGISTRATIONS;
-  if (!stored) {
-    localStorage.setItem(STORAGE_KEY_REGISTRATIONS, JSON.stringify(DEFAULT_REGISTRATIONS));
-  } else {
-    try {
-      const parsed = JSON.parse(stored);
-      list = Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_REGISTRATIONS;
-    } catch {
-      list = DEFAULT_REGISTRATIONS;
-    }
+  if (!stored) return eventId ? [] : [];
+  let list: RegistrationItem[] = [];
+  try {
+    const parsed = JSON.parse(stored);
+    list = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    list = [];
   }
   return eventId ? list.filter((r) => r.event_id === eventId) : list;
 }
