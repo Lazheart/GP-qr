@@ -288,9 +288,6 @@ function DashboardContent() {
         <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-4">
             <Link href="/" className="flex items-center gap-2 group">
-              <div className="flex h-7 w-7 items-center justify-center rounded-md bg-white text-black font-bold text-sm tracking-tighter transition-transform group-hover:scale-105">
-                ▲
-              </div>
               <span className="text-sm font-bold tracking-tight text-white flex items-center gap-2">
                 GPQR
                 <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-mono text-zinc-300">
@@ -1041,7 +1038,7 @@ function DashboardContent() {
 
       {/* Footer */}
       <footer className="relative z-10 border-t border-white/[0.08] py-4 text-center text-xs text-zinc-600 font-mono">
-        GPQR Dashboard • Supabase Events & Registrations
+        GPQR Dashboard
       </footer>
     </div>
   );

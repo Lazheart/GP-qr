@@ -144,9 +144,6 @@ export default function AuthPage() {
       <header className="relative z-10 w-full border-b border-white/[0.08] bg-black/60 backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
           <Link href="/" className="flex items-center gap-2 group">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-white text-black font-bold text-sm tracking-tighter transition-transform group-hover:scale-105">
-              ▲
-            </div>
             <span className="text-sm font-semibold tracking-tight text-white">
               GPQR <span className="text-zinc-500 font-mono text-xs">Auth</span>
             </span>
