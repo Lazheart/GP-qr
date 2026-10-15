@@ -185,9 +185,6 @@ export default function AuthPage() {
 
             {/* PRIMARY BUTTON / SWIPE CONTROL TO SWITCH BETWEEN LOGIN AND REGISTER */}
             <div className="mb-7">
-              <label className="block text-[11px] font-mono text-zinc-400 uppercase tracking-wider mb-2 text-center">
-                Modo de Acceso
-              </label>
               <div
                 role="region"
                 aria-label="Selector de modo de autenticación"
@@ -334,9 +331,8 @@ export default function AuthPage() {
                 ) : (
                   <>
                     <span>
-                      {authMode === "login" ? "Entrar al Sistema" : "Crear mi Cuenta"}
+                      {authMode === "login" ? "Ingresar" : "Registrarse"}
                     </span>
-                    <ArrowRight className="h-3.5 w-3.5" />
                   </>
                 )}
               </button>
