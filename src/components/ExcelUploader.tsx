@@ -98,9 +98,9 @@ export function ExcelUploader({
           continue;
         }
 
-        const token = `GPQR-${selectedEvent.id.slice(0, 8)}-${row.document_number.trim()}`;
+        const token = crypto.randomUUID();
         newRegistrations.push({
-          id: "reg-" + Math.random().toString(36).substring(2, 9),
+          id: crypto.randomUUID(),
           event_id: selectedEvent.id,
           document_number: row.document_number.trim(),
           full_name: row.full_name.trim(),
@@ -113,11 +113,28 @@ export function ExcelUploader({
         });
       }
 
+      // Try inserting into Supabase
+      try {
+        const { createBulkRegistrationsInSupabase } = await import("@/lib/db");
+        await createBulkRegistrationsInSupabase(
+          selectedEvent.id,
+          newRegistrations.map((r) => ({
+            document_number: r.document_number,
+            full_name: r.full_name,
+            email: r.email || undefined,
+            phone: r.phone || undefined,
+          }))
+        );
+      } catch (sbErr) {
+        console.warn("Supabase bulk insert warning:", sbErr);
+      }
+
+      // Keep local sync
       saveRegistrations([...newRegistrations, ...existing]);
 
       setImportSuccessMessage(
         `Se importaron con éxito ${newRegistrations.length} asistentes.` +
-          (skippedCount > 0 ? ` (${skippedCount} ya estaban registrados).` : "")
+          (skippedCount > 0 ? ` (${skippedCount} omitidos por ya estar registrados).` : "")
       );
 
       if (onImportCompleted) {
@@ -138,13 +155,13 @@ export function ExcelUploader({
     try {
       const validRows = parsedData.rows.filter((r) => r.isValid);
       const tempRegistrations: RegistrationItem[] = validRows.map((row) => ({
-        id: "temp-" + row.document_number,
+        id: crypto.randomUUID(),
         event_id: selectedEvent.id,
         document_number: row.document_number,
         full_name: row.full_name,
         email: row.email,
         phone: row.phone,
-        qr_token: `GPQR-${selectedEvent.id.slice(0, 8)}-${row.document_number.trim()}`,
+        qr_token: crypto.randomUUID(),
         status: "registered",
         checked_in_at: null,
         created_at: new Date().toISOString(),

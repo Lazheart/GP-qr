@@ -17,10 +17,8 @@ export function Navbar({ events = [], selectedEventId, onSelectEvent }: NavbarPr
 
   const navLinks = [
     { href: "/", label: "Inicio", icon: ShieldCheck },
-    { href: "/#generador", label: "Generador", icon: QrCode },
-    { href: "/#importar", label: "Carga Masiva", icon: Upload },
-    { href: "/escanear", label: "Escáner", icon: ScanLine },
-    { href: "/usuarios", label: "Asistentes", icon: Users },
+    { href: "/dashboard", label: "Dashboard", icon: Users },
+    { href: "/auth", label: "Acceso / Login", icon: QrCode },
   ];
 
   return (

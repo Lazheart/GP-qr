@@ -101,22 +101,27 @@ export function QRScanner({
   };
 
   // Manejar el resultado de un escaneo
-  const handleExecuteScan = (rawToken: string) => {
+  const handleExecuteScan = async (rawToken: string) => {
     if (!rawToken.trim() || !selectedEvent) return;
 
-    const res = processScanToken(selectedEvent.id, rawToken);
-    setLastScanResult(res);
+    try {
+      const { scanEventQRWithSupabase } = await import("@/lib/db");
+      const res = await scanEventQRWithSupabase(selectedEvent.id, rawToken);
+      setLastScanResult(res);
 
-    if (res.result === "accepted") {
-      playBeep("success");
-    } else if (res.result === "already_attended") {
-      playBeep("warning");
-    } else {
-      playBeep("error");
+      if (res.result === "accepted") {
+        playBeep("success");
+      } else if (res.result === "already_attended") {
+        playBeep("warning");
+      } else {
+        playBeep("error");
+      }
+
+      refreshLogs();
+      if (onScanCompleted) onScanCompleted();
+    } catch (err) {
+      console.error("Error executing scan:", err);
     }
-
-    refreshLogs();
-    if (onScanCompleted) onScanCompleted();
   };
 
   // Iniciar cámara web

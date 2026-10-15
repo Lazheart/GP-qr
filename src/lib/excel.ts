@@ -159,3 +159,35 @@ export function exportAttendanceToExcel(
   const fileName = `Asistencia_${cleanEventName}_${new Date().toISOString().slice(0, 10)}.xlsx`;
   XLSX.writeFile(workbook, fileName);
 }
+
+/**
+ * Genera y descarga una plantilla modelo de Excel para importación de asistentes
+ */
+export function downloadExcelTemplate() {
+  const sampleData = [
+    {
+      "DNI / Documento": "71829304",
+      "Nombre Completo": "Alejandro Morales Vera",
+      "Correo Electrónico": "alejandro.morales@example.com",
+      "Teléfono": "+51 981 234 567",
+    },
+    {
+      "DNI / Documento": "44918203",
+      "Nombre Completo": "Camila Fernanda Silva",
+      "Correo Electrónico": "camila.silva@example.com",
+      "Teléfono": "+51 992 345 678",
+    },
+    {
+      "DNI / Documento": "10293847",
+      "Nombre Completo": "Rodrigo Andrés Cárdenas",
+      "Correo Electrónico": "rodrigo.cardenas@example.com",
+      "Teléfono": "+51 913 456 789",
+    },
+  ];
+
+  const worksheet = XLSX.utils.json_to_sheet(sampleData);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Asistentes");
+  XLSX.writeFile(workbook, "Plantilla_Importar_Asistentes_GPQR.xlsx");
+}
+

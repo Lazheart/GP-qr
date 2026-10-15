@@ -32,11 +32,13 @@ export function QRGenerator({
 
   const selectedEvent = events.find((e) => e.id === currentEventId) || events[0];
 
-  // Generar token representativo
-  const currentToken =
-    documentNumber.trim() && selectedEvent
-      ? `GPQR-${selectedEvent.id.slice(0, 8)}-${documentNumber.trim()}`
-      : "GPQR-DEMO-SAMPLE-TOKEN";
+  const [tokenUuid, setTokenUuid] = useState<string>("");
+
+  useEffect(() => {
+    setTokenUuid(crypto.randomUUID());
+  }, [documentNumber]);
+
+  const currentToken = tokenUuid || "00000000-0000-0000-0000-000000000000";
 
   const updateQR = useCallback(async (tokenText: string) => {
     setIsGenerating(true);
@@ -83,7 +85,7 @@ export function QRGenerator({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleSaveAttendee = (e: React.FormEvent) => {
+  const handleSaveAttendee = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName.trim() || !documentNumber.trim() || !selectedEvent) return;
 
@@ -100,22 +102,42 @@ export function QRGenerator({
       return;
     }
 
+    const regId = crypto.randomUUID();
+    const qrTok = currentToken;
+
     const newReg: RegistrationItem = {
-      id: "reg-" + Math.random().toString(36).substring(2, 9),
+      id: regId,
       event_id: selectedEvent.id,
       document_number: documentNumber.trim(),
       full_name: fullName.trim(),
       email: email.trim() || undefined,
       phone: phone.trim() || undefined,
-      qr_token: currentToken,
+      qr_token: qrTok,
       status: "registered",
       checked_in_at: null,
       created_at: new Date().toISOString(),
     };
 
+    // Try Supabase insert
+    try {
+      const { createRegistrationInSupabase } = await import("@/lib/db");
+      await createRegistrationInSupabase(selectedEvent.id, {
+        document_number: documentNumber.trim(),
+        full_name: fullName.trim(),
+        email: email.trim() || undefined,
+        phone: phone.trim() || undefined,
+        qr_token: qrTok,
+      });
+    } catch (sbErr) {
+      console.warn("Supabase insert registration warning:", sbErr);
+    }
+
     saveRegistrations([newReg, ...allRegs]);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
+
+    // Reset next token
+    setTokenUuid(crypto.randomUUID());
 
     if (onAttendeeAdded) onAttendeeAdded();
 
